@@ -1,0 +1,86 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  jwt_secret: {{ fin.lending.cs_tool.server.jwt_secret }}
+  web_dir: "web"
+  encryption_key: {{ fin.lending.cs_tool.server.encryption_key }}
+
+mcp_server:
+  host: "0.0.0.0"
+  port: 8080
+  auth_token: {{ fin.lending.cs_tool.mcp_server.auth_token }}
+
+llm:
+  provider: "litellm"
+  model: "gemini/gemini-3.1-pro-preview"
+  base_url: "https://litellm.zalopay.vn/v1"
+  api_key: {{ fin.lending.cs_tool.llm.api_key }}
+
+agent:
+  max_iterations: 20
+  max_message_chars: 32000
+  context_window: 200000
+  max_history_share: 0.75 # fraction of context window for history before compact triggers
+  memory_recall_min_score: 0.3 # drop per-turn memory prefetch below this score; 0=default(0.3), negative=disable
+  memory_capture_every_turns: 0 # run a memory-capture flush every N user turns; 0=off (pre-compaction flush still runs)
+  temperature: 1.0 # agent-loop sampling temperature; 0=default(1.0)
+  top_p: 1.0 # agent-loop nucleus sampling top_p; 0=default(1.0)
+
+mysql:
+  dsn: {{ fin.lending.cs_tool.mysql.dns }}
+
+jira:
+  url: "https://jira.zalopay.vn"
+  personal_token: {{ fin.lending.cs_tool.jira.personal_token }}
+
+opensearch:
+  host: "10.60.45.80"
+  port: 8200
+  user: "fin_dev"
+  password: {{ fin.lending.cs_tool.opensearch.password }}
+  index: "zlp-logs-fin-cash-loan-dev"
+
+qdrant:
+  host: "dev-qdrant.zalopay.vn"
+  port: 443
+  api_key: {{ fin.lending.cs_tool.qdrant.api_key }}
+  score_threshold: 0.5
+
+embedding:
+  base_url: "https://vllm-embedding.zalopay.vn"
+  model: "qwen3-embedding-0.6b"
+  vector_size: 1024
+
+onboarding:
+  grpc_address: "devgrpc-fin-lending.zalopay.vn:443"
+  grpc_secure: true
+  client_id: "cashloan-onboard"
+  client_key: "abc@123"
+
+confluence:
+  url: "https://confluence.zalopay.vn"
+  api_key: {{ fin.lending.cs_tool.confluence.api_key }}
+
+# translator:
+#   model: "gemini/gemini-3-flash-preview"
+#   base_url: "https://litellm.zalopay.vn/v1"
+#   api_key: {{ fin.lending.cs_tool.llm.api_key }}
+
+skills:
+  cache_refresh_interval: 1m
+
+telemetry:
+  service_name: "fin-lending-claw"
+  otlp_endpoint: "10.109.3.48:4317"
+  langfuse:
+    enabled: true
+    endpoint: "https://dev-langfuse.zalopay.vn/api/public/otel/v1/traces"
+    public_key: {{ fin.lending.cs_tool.telemetry.langfuse.public_key }}
+    secret_key: {{ fin.lending.cs_tool.telemetry.langfuse.secret_key }}
+
+rbac:
+  enabled: true
+
+cas:
+  base_url: "https://zlpdev-platform-cas.zalopay.vn"
+  token_ttl: 24h

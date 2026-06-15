@@ -1,0 +1,12 @@
+references/
+.git/
+.cursor/
+.claude/
+.env
+.env.local
+__debug_bin*
+lending-claw
+*.plan.md
+main_test.go
+ui/web/node_modules/
+ui/web/dist/

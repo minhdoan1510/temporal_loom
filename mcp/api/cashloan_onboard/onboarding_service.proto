@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package cash_loan.onboarding_service.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/api/cashloan_onboard";
+
+service Onboarding {
+  rpc GetAllLoanApplications(GetAllLoanApplicationsRequest) returns (GetAllLoanApplicationsResponse) {}
+}
+
+message GetAllLoanApplicationsRequest {
+  int64 last_id = 1 [json_name = "last_id"];
+  int32 size = 2 [json_name = "size"];
+  optional string zalopay_id = 3 [json_name = "zalopay_id"];
+  optional string loan_application_id = 4 [json_name = "loan_application_id"];
+  optional string partner_contract_id = 5 [json_name = "partner_contract_id"];
+  optional string partner_contract_number = 6 [json_name = "partner_contract_number"];
+}
+
+message GetAllLoanApplicationsResponse {
+  repeated GetAllLoanApplicationItem data = 1 [json_name = "data"];
+  int32 total_count = 2 [json_name = "total_count"];
+  int64 last_id = 3 [json_name = "last_id"];
+  int32 size = 4 [json_name = "size"];
+}
+
+message GetAllLoanApplicationItem {
+  int64 id = 1 [json_name = "id"];
+  string loan_application_id = 2 [json_name = "loan_application_id"];
+  string zalopay_id = 3 [json_name = "zalopay_id"];
+  string partner_code = 4 [json_name = "partner_code"];
+  int32 status = 5 [json_name = "status"];
+  int32 code = 6 [json_name = "code"];
+  string code_message = 7 [json_name = "code_message"];
+  string current_step = 8 [json_name = "current_step"];
+  string partner_contract_id = 9 [json_name = "partner_contract_id"];
+  string partner_contract_number = 10 [json_name = "partner_contract_number"];
+  int64 loan_amount = 11 [json_name = "loan_amount"];
+  string loan_term = 12 [json_name = "loan_term"];
+  string loan_info = 13 [json_name = "loan_info"];
+  string product_code = 14 [json_name = "product_code"];
+  google.protobuf.Timestamp created_at = 15 [json_name = "created_at"];
+  google.protobuf.Timestamp updated_at = 16 [json_name = "updated_at"];
+  int64 approved_amount = 17 [json_name = "approved_amount"];
+  optional google.protobuf.Timestamp approved_at = 18 [json_name = "approved_at"];
+  string approved_term = 19 [json_name = "approved_term"];
+  string validation = 20 [json_name = "validation"];
+  optional google.protobuf.Timestamp submit_info_at = 21 [json_name = "submit_info_at"];
+  optional google.protobuf.Timestamp face_authen_at = 22 [json_name = "face_authen_at"];
+  optional google.protobuf.Timestamp sign_contract_at = 23 [json_name = "sign_contract_at"];
+  string product_line = 24 [json_name = "product_line"];
+}

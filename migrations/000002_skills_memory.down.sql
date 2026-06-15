@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS memory_docs;
+DROP TABLE IF EXISTS skills;

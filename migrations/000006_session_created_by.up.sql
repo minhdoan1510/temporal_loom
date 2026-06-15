@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN created_by VARCHAR(255) DEFAULT NULL AFTER session_key;

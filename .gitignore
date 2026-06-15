@@ -1,0 +1,28 @@
+# Binary
+lending-claw
+
+# Secrets
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Go
+vendor/
+
+references/
+
+config/local.yaml
+
+__debug_bin*
+
+tmp
+mcp/code_analyzer/dist
+mcp/code_analyzer/node_modules

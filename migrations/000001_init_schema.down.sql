@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS context_files;
+DROP TABLE IF EXISTS sessions;
