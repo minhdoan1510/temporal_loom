@@ -1,0 +1,88 @@
+# All-in-one image for GreenNode AgentBase.
+#
+# Bundles the lending-claw app, the MCP server, MySQL and Qdrant into a single
+# container managed by supervisord. AgentBase only sees port 8080 (the app +
+# its GET /health). MySQL (3306), Qdrant (6333) and the MCP server (8090) run
+# internally on localhost.
+#
+# NOTE: MySQL/Qdrant data lives inside the container and is ephemeral — intended
+# for a single-replica demo/hackathon deployment.
+
+# Builder stages run on the native build platform ($BUILDPLATFORM) and
+# cross-compile Go to the target arch ($TARGETARCH). This avoids emulating the
+# Go toolchain (which segfaults under QEMU when building amd64 on an arm64 Mac)
+# and is much faster. Only the final runtime image runs on the target platform.
+
+# --- Stage 1: Build FE ---
+FROM --platform=$BUILDPLATFORM node:22-alpine AS fe-builder
+WORKDIR /fe
+COPY ui/web/package.json ui/web/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY ui/web/ ./
+RUN pnpm build
+
+# --- Stage 2: Build Go app ---
+FROM --platform=$BUILDPLATFORM golang:1.25.10 AS go-builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o ./app .
+
+# --- Stage 3: Build MCP server ---
+FROM --platform=$BUILDPLATFORM golang:1.25.10 AS mcp-builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+WORKDIR /build
+COPY mcp/go.mod mcp/go.sum ./
+RUN go mod download
+COPY ./mcp/ ./
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o ./mcp .
+
+# --- Qdrant binary source ---
+FROM qdrant/qdrant:v1.13.4 AS qdrant
+
+# --- Stage 4: Final all-in-one ---
+# Ubuntu 24.04 base: ships MySQL 8.0 in its repos (real MySQL → migrations stay
+# compatible) and has a new enough glibc/libstdc++ + libunwind to run the
+# prebuilt (Debian-built) Qdrant binary natively — no shared-lib juggling.
+FROM ubuntu:24.04
+
+ENV TZ=Asia/Saigon \
+    DEBIAN_FRONTEND=noninteractive
+
+# mysql-server/-client: bundled DB + client (also gives mysqladmin).
+# gettext-base: envsubst for config rendering. libunwind8: Qdrant dependency.
+# Wipe the package-initialized data dir so the entrypoint initializes a clean
+# one deterministically at runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         mysql-server mysql-client gettext-base libunwind8 ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/lib/mysql/* \
+    && mkdir -p /var/lib/mysql /var/run/mysqld \
+    && chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+
+# Bundled Qdrant binary + its default config.
+COPY --from=qdrant /qdrant/qdrant /qdrant/qdrant
+COPY --from=qdrant /qdrant/config /qdrant/config
+RUN mkdir -p /qdrant/storage
+
+WORKDIR /apps
+
+# App artifacts.
+COPY --from=go-builder /build/app ./lending-claw
+COPY --from=mcp-builder /build/mcp ./mcp
+COPY --from=fe-builder /fe/dist ./web
+COPY migrations/ ./migrations/
+COPY config/config.agentbase.yaml.tmpl ./config/config.agentbase.yaml.tmpl
+COPY deploy/agentbase/ ./deploy/agentbase/
+
+RUN chmod +x ./deploy/agentbase/entrypoint.sh \
+    && chown -R mysql:mysql /qdrant
+
+EXPOSE 8080
+
+ENTRYPOINT ["/apps/deploy/agentbase/entrypoint.sh"]

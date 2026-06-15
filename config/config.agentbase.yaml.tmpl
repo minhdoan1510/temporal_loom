@@ -1,0 +1,95 @@
+# AgentBase all-in-one config template.
+#
+# Rendered at container start by `deploy/agentbase/entrypoint.sh` via `envsubst`
+# into /apps/config/config.yaml. ${VARS} are filled from environment variables
+# injected by AgentBase (set in scripts/deploy-agentbase.sh -> environmentVariables).
+#
+# MySQL and Qdrant point at the bundled, in-container instances (127.0.0.1).
+# External services (litellm / embedding / langfuse / jira / opensearch / cas)
+# keep their existing URLs and receive only their secrets via env.
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  jwt_secret: "${JWT_SECRET}"
+  web_dir: "web"
+  encryption_key: "${ENCRYPTION_KEY}"
+
+# MCP server runs in the same container; moved off 8080 (reserved for the app
+# + AgentBase health checks) to an internal port.
+mcp_server:
+  host: "0.0.0.0"
+  port: 8090
+  auth_token: "${MCP_AUTH_TOKEN}"
+
+llm:
+  provider: "litellm"
+  model: "gemini/gemini-3.1-pro-preview"
+  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
+  api_key: "${LLM_API_KEY}"
+
+agent:
+  max_iterations: 20
+  max_message_chars: 32000
+  context_window: 200000
+  max_history_share: 0.75
+  memory_recall_min_score: 0.3
+  memory_capture_every_turns: 0
+  temperature: 1.0
+  top_p: 1.0
+
+# Bundled MySQL (see supervisord/entrypoint). DB + user created on first boot.
+mysql:
+  dsn: "agent:${MYSQL_PASSWORD}@tcp(127.0.0.1:3306)/lending_agent?charset=utf8mb4&parseTime=true&loc=UTC"
+
+jira:
+  url: "https://jira.zalopay.vn"
+  personal_token: "${JIRA_PERSONAL_TOKEN}"
+
+opensearch:
+  host: "10.60.45.80"
+  port: 8200
+  user: "fin_dev"
+  password: "${OPENSEARCH_PASSWORD}"
+  index: "zlp-logs-fin-cash-loan-dev"
+
+# Bundled Qdrant. port != 443 => plaintext HTTP (REST), no api_key.
+qdrant:
+  host: "127.0.0.1"
+  port: 6333
+  api_key: ""
+  score_threshold: 0.5
+
+embedding:
+  base_url: "https://vllm-embedding.zalopay.vn"
+  model: "qwen3-embedding-0.6b"
+  vector_size: 1024
+
+onboarding:
+  grpc_address: "devgrpc-fin-lending.zalopay.vn:443"
+  grpc_secure: true
+  client_id: "cashloan-onboard"
+  client_key: "abc@123"
+
+confluence:
+  url: "https://confluence.zalopay.vn"
+  api_key: "${CONFLUENCE_API_KEY}"
+
+skills:
+  cache_refresh_interval: 1m
+
+telemetry:
+  service_name: "fin-lending-claw"
+  otlp_endpoint: "10.109.3.48:4317"
+  langfuse:
+    enabled: true
+    endpoint: "https://dev-langfuse.zalopay.vn/api/public/otel/v1/traces"
+    public_key: "${LANGFUSE_PUBLIC_KEY}"
+    secret_key: "${LANGFUSE_SECRET_KEY}"
+
+rbac:
+  enabled: true
+
+cas:
+  base_url: "https://zlpdev-platform-cas.zalopay.vn"
+  token_ttl: 24h

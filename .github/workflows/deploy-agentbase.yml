@@ -1,0 +1,111 @@
+name: Deploy to AgentBase
+
+# Auto-build the all-in-one image (app + MCP + MySQL + Qdrant) and roll it out to
+# the GreenNode AgentBase runtime on every push to main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "mcp/**"
+      - "ui/web/**"
+      - "migrations/**"
+      - "config/config.agentbase.yaml.tmpl"
+      - "deploy/agentbase/**"
+      - "Dockerfile.agentbase"
+      - ".github/workflows/deploy-agentbase.yml"
+  workflow_dispatch: {} # allow manual runs
+
+env:
+  REGISTRY: vcr.vngcloud.vn
+  IMAGE_NAME: lending-claw
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest # amd64 runner → native build, no emulation
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image reference
+        id: meta
+        run: |
+          echo "image=${REGISTRY}/${{ secrets.VCR_REPO }}/${IMAGE_NAME}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to vCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.VCR_USERNAME }}
+          password: ${{ secrets.VCR_PASSWORD }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agentbase
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ env.REGISTRY }}/${{ secrets.VCR_REPO }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Roll out new version on AgentBase
+        env:
+          API: https://aiplatform.console.vngcloud.vn/runtime-api
+          TOKEN: ${{ secrets.AGENTBASE_API_TOKEN }}
+          RUNTIME_ID: ${{ secrets.AGENTBASE_RUNTIME_ID }}
+          IMAGE: ${{ needs.build-and-push.outputs.image }}
+          # App env vars injected into the runtime (kept as repo/Actions secrets).
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          MCP_AUTH_TOKEN: ${{ secrets.MCP_AUTH_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Build the environmentVariables object from the secrets that are set.
+          ENV_JSON=$(jq -n '{}')
+          add() { [ -n "${2:-}" ] && ENV_JSON=$(jq --arg k "$1" --arg v "$2" '. + {($k):$v}' <<<"$ENV_JSON") || true; }
+          add MYSQL_PASSWORD "$MYSQL_PASSWORD"
+          add JWT_SECRET     "$JWT_SECRET"
+          add ENCRYPTION_KEY "$ENCRYPTION_KEY"
+          add MCP_AUTH_TOKEN "$MCP_AUTH_TOKEN"
+          add LLM_API_KEY    "$LLM_API_KEY"
+
+          PAYLOAD=$(jq -n --arg img "$IMAGE" --argjson env "$ENV_JSON" \
+            '{ imageUrl: $img, environmentVariables: $env }')
+
+          echo "Creating new version for ${RUNTIME_ID} -> ${IMAGE}"
+          HTTP=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          echo "HTTP $HTTP"; cat /tmp/resp.json || true
+          [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ] || { echo "Rollout failed"; exit 1; }
+
+          echo "Waiting for runtime to become ACTIVE…"
+          for _ in $(seq 1 60); do
+            STATUS=$(curl -sS "${API}/agent-runtimes/${RUNTIME_ID}" \
+              -H "Authorization: Bearer ${TOKEN}" | jq -r '.status // .data.status // "UNKNOWN"')
+            echo "  status=$STATUS"
+            case "$STATUS" in
+              ACTIVE) echo "Deployed."; exit 0 ;;
+              FAILED|ERROR) echo "Deployment failed."; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Timed out waiting for ACTIVE"; exit 1
