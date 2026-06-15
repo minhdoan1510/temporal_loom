@@ -82,6 +82,7 @@ jobs:
           [ -n "$TOKEN" ] || { echo "Failed to obtain access token"; exit 1; }
 
           # 2) Build the environmentVariables object from the secrets that are set.
+          #    (Secret env values are not returned by the API, so we re-supply them.)
           ENV_JSON=$(jq -n '{}')
           add() { [ -n "${2:-}" ] && ENV_JSON=$(jq --arg k "$1" --arg v "$2" '. + {($k):$v}' <<<"$ENV_JSON") || true; }
           add MYSQL_PASSWORD "$MYSQL_PASSWORD"
@@ -90,8 +91,23 @@ jobs:
           add MCP_AUTH_TOKEN "$MCP_AUTH_TOKEN"
           add LLM_API_KEY    "$LLM_API_KEY"
 
-          PAYLOAD=$(jq -n --arg img "$IMAGE" --argjson env "$ENV_JSON" \
-            '{ imageUrl: $img, environmentVariables: $env }')
+          # Carry over the latest version's config (flavor, autoscaling, imageAuth,
+          # network) and only swap the image + env.
+          curl -sS "${API}/agent-runtimes/${RUNTIME_ID}/versions?page=1&size=100" \
+            -H "Authorization: Bearer ${TOKEN}" > /tmp/versions.json
+          PAYLOAD=$(jq -n \
+            --arg img "$IMAGE" \
+            --argjson env "$ENV_JSON" \
+            --slurpfile v /tmp/versions.json \
+            '($v[0].listData // [] | max_by(.version)) as $cur
+             | {
+                 imageUrl: $img,
+                 environmentVariables: $env,
+                 flavorId: ($cur.flavorId // "runtime-s2-general-4x8"),
+                 autoscaling: ($cur.autoscaling // {minReplicas:1,maxReplicas:1,cpuUtilization:70,memoryUtilization:70}),
+                 imageAuth: ($cur.imageAuth // {enabled:true, useAgentBaseRegistryCredentials:true}),
+                 networkConfig: ($cur.networkConfig // {mode:"PUBLIC"})
+               }')
 
           # 3) Create a new runtime version pointing at the freshly pushed image.
           echo "Creating new version for ${RUNTIME_ID} -> ${IMAGE}"
