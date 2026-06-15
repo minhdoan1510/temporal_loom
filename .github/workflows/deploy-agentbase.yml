@@ -20,20 +20,14 @@ on:
 
 env:
   REGISTRY: vcr.vngcloud.vn
+  VCR_REPO: "111480-abp111767" # registry project (not secret — appears in image URLs)
   IMAGE_NAME: lending-claw
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest # amd64 runner → native build, no emulation
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compute image reference
-        id: meta
-        run: |
-          echo "image=${REGISTRY}/${{ secrets.VCR_REPO }}/${IMAGE_NAME}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -52,8 +46,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.meta.outputs.image }}
-            ${{ env.REGISTRY }}/${{ secrets.VCR_REPO }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -63,10 +57,13 @@ jobs:
     steps:
       - name: Roll out new version on AgentBase
         env:
-          API: https://aiplatform.console.vngcloud.vn/runtime-api
-          TOKEN: ${{ secrets.AGENTBASE_API_TOKEN }}
+          # IAM service-account credentials (client_credentials OAuth flow).
+          TOKEN_URL: https://iam.api.vngcloud.vn/accounts-api/v2/auth/token
+          API: https://agentbase.api.vngcloud.vn/runtime
+          CLIENT_ID: ${{ secrets.AGENTBASE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AGENTBASE_CLIENT_SECRET }}
           RUNTIME_ID: ${{ secrets.AGENTBASE_RUNTIME_ID }}
-          IMAGE: ${{ needs.build-and-push.outputs.image }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           # App env vars injected into the runtime (kept as repo/Actions secrets).
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -76,7 +73,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Build the environmentVariables object from the secrets that are set.
+          # 1) Exchange service-account ClientID/Secret for a bearer access token.
+          echo "Requesting access token…"
+          TOKEN=$(curl -sS -u "${CLIENT_ID}:${CLIENT_SECRET}" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "grant_type=client_credentials" \
+            "${TOKEN_URL}" | jq -r '.access_token // .data.accessToken // empty')
+          [ -n "$TOKEN" ] || { echo "Failed to obtain access token"; exit 1; }
+
+          # 2) Build the environmentVariables object from the secrets that are set.
           ENV_JSON=$(jq -n '{}')
           add() { [ -n "${2:-}" ] && ENV_JSON=$(jq --arg k "$1" --arg v "$2" '. + {($k):$v}' <<<"$ENV_JSON") || true; }
           add MYSQL_PASSWORD "$MYSQL_PASSWORD"
@@ -88,6 +93,7 @@ jobs:
           PAYLOAD=$(jq -n --arg img "$IMAGE" --argjson env "$ENV_JSON" \
             '{ imageUrl: $img, environmentVariables: $env }')
 
+          # 3) Create a new runtime version pointing at the freshly pushed image.
           echo "Creating new version for ${RUNTIME_ID} -> ${IMAGE}"
           HTTP=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
             -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
@@ -97,6 +103,7 @@ jobs:
           echo "HTTP $HTTP"; cat /tmp/resp.json || true
           [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ] || { echo "Rollout failed"; exit 1; }
 
+          # 4) Poll until ACTIVE.
           echo "Waiting for runtime to become ACTIVE…"
           for _ in $(seq 1 60); do
             STATUS=$(curl -sS "${API}/agent-runtimes/${RUNTIME_ID}" \
