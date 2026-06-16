@@ -351,6 +351,10 @@ jobs:
           CLIENT_SECRET: ${{ secrets.AGENTBASE_CLIENT_SECRET }}
           RUNTIME_ID: ${{ secrets.AGENTBASE_MCP_RUNTIME_ID }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+          # vCR pull credentials — supplied to AgentBase as imageAuth so the runtime
+          # can pull the MCP image from the private registry.
+          VCR_USERNAME: ${{ secrets.VCR_USERNAME }}
+          VCR_PASSWORD: ${{ secrets.VCR_PASSWORD }}
           # MCP env vars injected into the runtime (kept as repo/Actions secrets).
           ENV_VARS: |
             MCP_AUTH_TOKEN=${{ secrets.MCP_AUTH_TOKEN }}
