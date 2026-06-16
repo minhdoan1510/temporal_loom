@@ -53,6 +53,10 @@ jobs:
 
   deploy:
     needs: build-and-push
+    # Deploy is manual-only: it runs when the workflow is triggered by hand
+    # (Run workflow / workflow_dispatch). On a plain push, build-and-push still
+    # runs and pushes the image, but this job is skipped.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Roll out new version on AgentBase
