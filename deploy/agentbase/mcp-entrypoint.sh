@@ -1,8 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Entrypoint for the standalone MCP server image (separate AgentBase runtime).
 # Renders the config from env vars (the MCP binary reads plain YAML, no env
 # interpolation) then execs the server.
-set -uo pipefail
+#
+# POSIX sh (not bash): the alpine base image ships busybox ash, no bash.
+set -u
 
 CONFIG_TMPL=/etc/mcp/config.mcp.yaml.tmpl
 CONFIG_OUT=/etc/mcp/config.yaml
