@@ -73,14 +73,39 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Safe debug logging helper. Secrets are masked by Actions, but we also
+          # avoid printing their values directly; only metadata (lengths, keys, …).
+          log() { echo "[debug] $*"; }
+
+          echo "::group::Step 0 — Preflight checks"
+          log "TOKEN_URL=${TOKEN_URL}"
+          log "API=${API}"
+          log "IMAGE=${IMAGE}"
+          log "RUNTIME_ID set? $([ -n "${RUNTIME_ID:-}" ] && echo yes || echo NO)"
+          log "CLIENT_ID set? $([ -n "${CLIENT_ID:-}" ] && echo yes || echo NO)"
+          log "CLIENT_SECRET set? $([ -n "${CLIENT_SECRET:-}" ] && echo yes || echo NO)"
+          log "curl version: $(curl --version | head -n1)"
+          log "jq version: $(jq --version)"
+          echo "::endgroup::"
+
+          echo "::group::Step 1 — Exchange credentials for access token"
           # 1) Exchange service-account ClientID/Secret for a bearer access token.
-          echo "Requesting access token…"
-          TOKEN=$(curl -sS -u "${CLIENT_ID}:${CLIENT_SECRET}" \
+          log "POST ${TOKEN_URL} (grant_type=client_credentials)"
+          TOKEN_HTTP=$(curl -sS -o /tmp/token.json -w '%{http_code}' \
+            -u "${CLIENT_ID}:${CLIENT_SECRET}" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "grant_type=client_credentials" \
-            "${TOKEN_URL}" | jq -r '.access_token // .data.accessToken // empty')
-          [ -n "$TOKEN" ] || { echo "Failed to obtain access token"; exit 1; }
+            "${TOKEN_URL}")
+          log "token endpoint HTTP=${TOKEN_HTTP}"
+          TOKEN=$(jq -r '.access_token // .data.accessToken // empty' /tmp/token.json)
+          if [ -z "$TOKEN" ]; then
+            log "response keys: $(jq -r 'keys? // [] | join(",")' /tmp/token.json 2>/dev/null || echo '<non-json>')"
+            echo "Failed to obtain access token"; exit 1
+          fi
+          log "token acquired (length=${#TOKEN})"
+          echo "::endgroup::"
 
+          echo "::group::Step 2 — Build payload (env + carried-over config)"
           # 2) Build the environmentVariables object from the secrets that are set.
           #    (Secret env values are not returned by the API, so we re-supply them.)
           ENV_JSON=$(jq -n '{}')
@@ -90,11 +115,17 @@ jobs:
           add ENCRYPTION_KEY "$ENCRYPTION_KEY"
           add MCP_AUTH_TOKEN "$MCP_AUTH_TOKEN"
           add LLM_API_KEY    "$LLM_API_KEY"
+          log "environmentVariables keys: $(jq -r 'keys | join(",")' <<<"$ENV_JSON")"
 
           # Carry over the latest version's config (flavor, autoscaling, imageAuth,
           # network) and only swap the image + env.
-          curl -sS "${API}/agent-runtimes/${RUNTIME_ID}/versions?page=1&size=100" \
-            -H "Authorization: Bearer ${TOKEN}" > /tmp/versions.json
+          log "GET ${API}/agent-runtimes/${RUNTIME_ID}/versions"
+          VERS_HTTP=$(curl -sS -o /tmp/versions.json -w '%{http_code}' \
+            "${API}/agent-runtimes/${RUNTIME_ID}/versions?page=1&size=100" \
+            -H "Authorization: Bearer ${TOKEN}")
+          log "versions endpoint HTTP=${VERS_HTTP}"
+          log "version count: $(jq -r '(.listData // []) | length' /tmp/versions.json 2>/dev/null || echo '?')"
+          log "latest version: $(jq -r '((.listData // []) | max_by(.version) | .version) // "none"' /tmp/versions.json 2>/dev/null || echo '?')"
           PAYLOAD=$(jq -n \
             --arg img "$IMAGE" \
             --argjson env "$ENV_JSON" \
@@ -108,27 +139,40 @@ jobs:
                  imageAuth: ($cur.imageAuth // {enabled:true, useAgentBaseRegistryCredentials:true}),
                  networkConfig: ($cur.networkConfig // {mode:"PUBLIC"})
                }')
+          # Print payload with env values redacted so we can verify the shape safely.
+          log "payload (env redacted):"
+          jq '.environmentVariables |= (with_entries(.value = "***"))' <<<"$PAYLOAD"
+          echo "::endgroup::"
 
+          echo "::group::Step 3 — Create new runtime version"
           # 3) Create a new runtime version pointing at the freshly pushed image.
-          echo "Creating new version for ${RUNTIME_ID} -> ${IMAGE}"
+          log "POST ${API}/agent-runtimes/${RUNTIME_ID}/versions -> ${IMAGE}"
           HTTP=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
             -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
-          echo "HTTP $HTTP"; cat /tmp/resp.json || true
-          [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ] || { echo "Rollout failed"; exit 1; }
+          log "create version HTTP=${HTTP}"
+          log "response body:"
+          cat /tmp/resp.json || true
+          echo
+          if ! { [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ]; }; then
+            echo "::endgroup::"
+            echo "Rollout failed"; exit 1
+          fi
+          echo "::endgroup::"
 
+          echo "::group::Step 4 — Wait for runtime to become ACTIVE"
           # 4) Poll until ACTIVE.
-          echo "Waiting for runtime to become ACTIVE…"
-          for _ in $(seq 1 60); do
+          for i in $(seq 1 60); do
             STATUS=$(curl -sS "${API}/agent-runtimes/${RUNTIME_ID}" \
               -H "Authorization: Bearer ${TOKEN}" | jq -r '.status // .data.status // "UNKNOWN"')
-            echo "  status=$STATUS"
+            log "poll ${i}/60 status=${STATUS}"
             case "$STATUS" in
-              ACTIVE) echo "Deployed."; exit 0 ;;
-              FAILED|ERROR) echo "Deployment failed."; exit 1 ;;
+              ACTIVE) echo "Deployed."; echo "::endgroup::"; exit 0 ;;
+              FAILED|ERROR) echo "Deployment failed."; echo "::endgroup::"; exit 1 ;;
             esac
             sleep 10
           done
+          echo "::endgroup::"
           echo "Timed out waiting for ACTIVE"; exit 1
