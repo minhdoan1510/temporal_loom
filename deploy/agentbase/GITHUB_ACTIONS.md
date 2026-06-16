@@ -2,14 +2,27 @@
 
 Workflow: [`.github/workflows/deploy-agentbase.yml`](../../.github/workflows/deploy-agentbase.yml)
 
-On every push to `main` (touching app code / image files) it:
+On every push to `main` (touching app code / image files) it runs four jobs:
 
 1. **build-and-push** — builds `Dockerfile.agentbase` (all-in-one: app + MCP + MySQL +
    Qdrant) on a native amd64 runner and pushes to
    `vcr.vngcloud.vn/<VCR_REPO>/lending-claw:<sha>` (+ `:latest`).
-2. **deploy** — creates a new **version** of the AgentBase runtime pointing at the new
-   image, via `POST {console}/runtime-api/agent-runtimes/<RUNTIME_ID>/versions`, then
-   polls until `ACTIVE`.
+2. **build-and-push-mcp** — builds the standalone `mcp/Dockerfile` (MCP server only,
+   port 7080) and pushes `vcr.vngcloud.vn/<VCR_REPO>/lending-claw-mcp:<sha>` (+ `:latest`).
+3. **deploy** — rolls a new **version** of the app runtime (`AGENTBASE_RUNTIME_ID`),
+   using its own inline rollout script.
+4. **deploy-mcp** — rolls a new **version** of the standalone MCP runtime
+   (`AGENTBASE_MCP_RUNTIME_ID`) via `scripts/deploy-mcp-agentbase.sh`.
+
+Each rollout exchanges the IAM service-account credentials for a token, carries over
+the latest version's flavor/autoscaling/imageAuth/network config, `POST`s a new
+version pointing at the freshly pushed image, then polls until `ACTIVE`.
+
+> The MCP runtime is **not** created by CI — pre-create it once in the AgentBase
+> console (network `PUBLIC`), copy its `runtime-...` id into `AGENTBASE_MCP_RUNTIME_ID`.
+> Then point the app's `mcp_servers` rows (Settings → MCP Servers) at
+> `https://<mcp-runtime-public-url>/mcp/{jira,opensearch,loan}` with `MCP_AUTH_TOKEN`.
+> The MCP bundled inside the all-in-one image keeps running, so cutover is gradual.
 
 ## Required repository secrets
 
@@ -20,6 +33,7 @@ Settings → Secrets and variables → Actions → **New repository secret**:
 | `VCR_USERNAME` | `111480-gui111767` | Container Registry → Credentials |
 | `VCR_PASSWORD` | *(registry secret key)* | Container Registry → Credentials |
 | `AGENTBASE_RUNTIME_ID` | `runtime-35e09d01-431e-433a-a44a-bc94f1e99783` | Runtime detail URL |
+| `AGENTBASE_MCP_RUNTIME_ID` | *(MCP runtime id)* | MCP runtime detail URL (pre-create in console) |
 | `AGENTBASE_CLIENT_ID` | *(service-account Client ID)* | IAM → Service account → Security credentials |
 | `AGENTBASE_CLIENT_SECRET` | *(service-account Client Secret)* | IAM → Service account → Security credentials (Reset to reveal) |
 | `MYSQL_PASSWORD` | *(same as deployed)* | `deploy/agentbase/.env` |
@@ -27,6 +41,8 @@ Settings → Secrets and variables → Actions → **New repository secret**:
 | `ENCRYPTION_KEY` | *(same as deployed)* | `deploy/agentbase/.env` |
 | `MCP_AUTH_TOKEN` | *(same as deployed)* | `deploy/agentbase/.env` |
 | `LLM_API_KEY` | *(litellm/MaaS key)* | provided |
+| `JIRA_PERSONAL_TOKEN` | *(Jira PAT)* | needed by standalone MCP (jira tools) |
+| `OPENSEARCH_PASSWORD` | *(opensearch password)* | needed by standalone MCP (opensearch tools) |
 
 > `VCR_REPO` (`111480-abp111767`) is **not** a secret — it's set in the workflow `env:`.
 

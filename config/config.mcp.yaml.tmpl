@@ -1,0 +1,34 @@
+# Standalone MCP server config template (separate AgentBase runtime).
+#
+# Rendered at container start by `deploy/agentbase/mcp-entrypoint.sh` via `envsubst` into
+# /etc/mcp/config.yaml. ${VARS} are filled from environment variables injected by
+# AgentBase (set in the deploy-mcp job -> environmentVariables).
+#
+# Only the sections the MCP binary reads are present (see mcp/internal/config).
+# No MySQL / Qdrant / LLM are needed by the MCP server.
+
+mcp_server:
+  host: "0.0.0.0"
+  port: 7080
+  auth_token: "${MCP_AUTH_TOKEN}"
+
+telemetry:
+  service_name: "lending-claw-mcp"
+  otlp_endpoint: ""
+
+jira:
+  url: "https://jira.zalopay.vn"
+  personal_token: "${JIRA_PERSONAL_TOKEN}"
+
+opensearch:
+  host: "10.60.45.80"
+  port: 8200
+  user: "fin_dev"
+  password: "${OPENSEARCH_PASSWORD}"
+  index: "zlp-logs-fin-cash-loan-dev"
+
+onboarding:
+  grpc_address: "devgrpc-fin-lending.zalopay.vn:443"
+  grpc_secure: true
+  client_id: "cashloan-onboard"
+  client_key: "abc@123"

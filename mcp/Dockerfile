@@ -1,14 +1,21 @@
-FROM golang:1.24-alpine AS build
+# Standalone MCP server image (deployed to its own AgentBase runtime).
+#
+# Build context is the REPO ROOT (not ./mcp) so we can pull in config/ and
+# deploy/agentbase/ alongside the mcp/ module. Build with:
+#   docker build -f mcp/Dockerfile -t lending-claw-mcp .
+FROM golang:1.25-alpine AS build
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY mcp/go.mod mcp/go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /out/mcp-server ./cmd/server
+COPY mcp/ ./
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/mcp-server .
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates gettext
 WORKDIR /app
 COPY --from=build /out/mcp-server /app/mcp-server
+COPY config/config.mcp.yaml.tmpl /etc/mcp/config.mcp.yaml.tmpl
+COPY deploy/agentbase/mcp-entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 EXPOSE 7080
-ENTRYPOINT ["/app/mcp-server"]
-CMD ["--config", "/etc/mcp/config.yaml"]
+ENTRYPOINT ["/app/entrypoint.sh"]

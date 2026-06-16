@@ -13,8 +13,11 @@ on:
       - "ui/web/**"
       - "migrations/**"
       - "config/config.agentbase.yaml.tmpl"
+      - "config/config.mcp.yaml.tmpl"
       - "deploy/agentbase/**"
+      - "scripts/deploy-mcp-agentbase.sh"
       - "Dockerfile.agentbase"
+      - "mcp/Dockerfile"
       - ".github/workflows/deploy-agentbase.yml"
   workflow_dispatch: {} # allow manual runs
 
@@ -22,6 +25,7 @@ env:
   REGISTRY: vcr.vngcloud.vn
   VCR_REPO: "111480-abp111767" # registry project (not secret — appears in image URLs)
   IMAGE_NAME: lending-claw
+  MCP_IMAGE_NAME: lending-claw-mcp
 
 jobs:
   build-and-push:
@@ -48,6 +52,33 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-and-push-mcp:
+    runs-on: ubuntu-latest # amd64 runner → native build, no emulation
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to vCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.VCR_USERNAME }}
+          password: ${{ secrets.VCR_PASSWORD }}
+
+      - name: Build & push MCP
+        uses: docker/build-push-action@v6
+        with:
+          context: . # repo root: mcp/Dockerfile pulls in config/ + deploy/agentbase/
+          file: mcp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.MCP_IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -205,3 +236,23 @@ jobs:
           done
           echo "::endgroup::"
           echo "Timed out waiting for ACTIVE"; exit 1
+
+  deploy-mcp:
+    needs: build-and-push-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Roll out new MCP version on AgentBase
+        env:
+          TOKEN_URL: https://iam.api.vngcloud.vn/accounts-api/v2/auth/token
+          API: https://agentbase.api.vngcloud.vn/runtime
+          CLIENT_ID: ${{ secrets.AGENTBASE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AGENTBASE_CLIENT_SECRET }}
+          RUNTIME_ID: ${{ secrets.AGENTBASE_MCP_RUNTIME_ID }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.MCP_IMAGE_NAME }}:${{ github.sha }}
+          # MCP env vars injected into the runtime (kept as repo/Actions secrets).
+          ENV_VARS: |
+            MCP_AUTH_TOKEN=${{ secrets.MCP_AUTH_TOKEN }}
+            JIRA_PERSONAL_TOKEN=${{ secrets.JIRA_PERSONAL_TOKEN }}
+            OPENSEARCH_PASSWORD=${{ secrets.OPENSEARCH_PASSWORD }}
+        run: ./scripts/deploy-mcp-agentbase.sh
