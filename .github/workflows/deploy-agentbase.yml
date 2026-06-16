@@ -64,6 +64,10 @@ jobs:
           CLIENT_SECRET: ${{ secrets.AGENTBASE_CLIENT_SECRET }}
           RUNTIME_ID: ${{ secrets.AGENTBASE_RUNTIME_ID }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # vCR pull credentials — supplied to AgentBase as imageAuth so the runtime
+          # can pull the image from the private registry.
+          VCR_USERNAME: ${{ secrets.VCR_USERNAME }}
+          VCR_PASSWORD: ${{ secrets.VCR_PASSWORD }}
           # App env vars injected into the runtime (kept as repo/Actions secrets).
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -153,33 +157,57 @@ jobs:
           fi
           log "version count: $(jq -r '(.listData // []) | length' /tmp/versions.json 2>/dev/null || echo '?')"
           log "latest version: $(jq -r '((.listData // []) | max_by(.version) | .version) // "none"' /tmp/versions.json 2>/dev/null || echo '?')"
+
+          # Build imageAuth for the private vCR registry. The runtime API expects
+          # {enabled, username, password}; prefer the vCR credentials, falling back
+          # to whatever the current version already had.
+          if [ -n "${VCR_USERNAME:-}" ] && [ -n "${VCR_PASSWORD:-}" ]; then
+            IMAGE_AUTH=$(jq -n --arg u "$VCR_USERNAME" --arg p "$VCR_PASSWORD" \
+              '{enabled:true, username:$u, password:$p}')
+            log "imageAuth: explicit vCR credentials (username=${VCR_USERNAME})"
+          else
+            IMAGE_AUTH=$(jq -r '((.listData // []) | max_by(.version) | .imageAuth) // {enabled:true}' /tmp/versions.json)
+            log "imageAuth: carried over from latest version"
+          fi
+
+          # Carry over flavor/autoscaling/networkConfig from the latest version and
+          # only swap the image, env, and imageAuth. PATCH /agent-runtimes/{id}
+          # creates a new version and points the DEFAULT endpoint at it.
           PAYLOAD=$(jq -n \
             --arg img "$IMAGE" \
             --argjson env "$ENV_JSON" \
+            --argjson imageAuth "$IMAGE_AUTH" \
             --slurpfile v /tmp/versions.json \
             '($v[0].listData // [] | max_by(.version)) as $cur
              | {
                  imageUrl: $img,
+                 description: ($cur.description // ""),
+                 command: [],
+                 args: [],
                  environmentVariables: $env,
                  flavorId: ($cur.flavorId // "runtime-s2-general-4x8"),
                  autoscaling: ($cur.autoscaling // {minReplicas:1,maxReplicas:1,cpuUtilization:70,memoryUtilization:70}),
-                 imageAuth: ($cur.imageAuth // {enabled:true, useAgentBaseRegistryCredentials:true}),
-                 networkConfig: ($cur.networkConfig // {mode:"PUBLIC"})
-               }')
-          # Print payload with env values redacted so we can verify the shape safely.
-          log "payload (env redacted):"
-          jq '.environmentVariables |= (with_entries(.value = "***"))' <<<"$PAYLOAD"
+                 imageAuth: $imageAuth
+               }
+             # networkConfig is optional — only include it when the current version has one.
+             + (if ($cur.networkConfig // null) != null then {networkConfig: $cur.networkConfig} else {} end)')
+          # Print payload with env + imageAuth password redacted so we can verify the shape safely.
+          log "payload (secrets redacted):"
+          jq '(.environmentVariables |= (with_entries(.value = "***")))
+              | (if .imageAuth.password then .imageAuth.password = "***" else . end)' <<<"$PAYLOAD"
           echo "::endgroup::"
 
-          echo "::group::Step 3 — Create new runtime version"
-          # 3) Create a new runtime version pointing at the freshly pushed image.
-          log "POST ${API}/agent-runtimes/${RUNTIME_ID}/versions -> ${IMAGE}"
+          echo "::group::Step 3 — Deploy new runtime version (PATCH)"
+          # 3) Update the runtime to point at the freshly pushed image. Per the
+          #    AgentBase runtime API, PATCH /agent-runtimes/{id} creates a new
+          #    version and auto-updates the DEFAULT endpoint.
+          log "PATCH ${API}/agent-runtimes/${RUNTIME_ID} -> ${IMAGE}"
           HTTP=$(curl -sS -o /tmp/resp.json -D /tmp/resp.headers -w '%{http_code}' \
-            -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
+            -X PATCH "${API}/agent-runtimes/${RUNTIME_ID}" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
-          log "create version HTTP=${HTTP}"
+          log "deploy HTTP=${HTTP}"
           log "response body:"
           cat /tmp/resp.json || true
           echo
@@ -192,14 +220,18 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Step 4 — Wait for runtime to become ACTIVE"
-          # 4) Poll until ACTIVE.
+          # 4) Poll until ACTIVE. Documented statuses: CREATING, UPDATING, ACTIVE,
+          #    ERROR, DELETING (CREATING/UPDATING are transient during a rollout).
           for i in $(seq 1 60); do
-            STATUS=$(curl -sS "${API}/agent-runtimes/${RUNTIME_ID}" \
-              -H "Authorization: Bearer ${TOKEN}" | jq -r '.status // .data.status // "UNKNOWN"')
+            curl -sS -o /tmp/status.json "${API}/agent-runtimes/${RUNTIME_ID}" \
+              -H "Authorization: Bearer ${TOKEN}" || true
+            STATUS=$(jq -r '.status // .data.status // "UNKNOWN"' /tmp/status.json 2>/dev/null || echo UNKNOWN)
             log "poll ${i}/60 status=${STATUS}"
             case "$STATUS" in
               ACTIVE) echo "Deployed."; echo "::endgroup::"; exit 0 ;;
-              FAILED|ERROR) echo "Deployment failed."; echo "::endgroup::"; exit 1 ;;
+              ERROR|FAILED|DELETING)
+                log "statusReason: $(jq -r '.statusReason // .data.statusReason // "n/a"' /tmp/status.json 2>/dev/null)"
+                echo "Deployment failed."; echo "::endgroup::"; exit 1 ;;
             esac
             sleep 10
           done
