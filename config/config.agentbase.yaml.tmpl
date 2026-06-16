@@ -24,7 +24,8 @@ mcp_server:
 
 llm:
   provider: "litellm"
-  model: "gemini/gemini-3.1-pro-preview"
+#  model: "gemini/gemini-3.1-pro-preview"
+  model: "qwen/qwen3.7-plus"
   base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
   api_key: "${LLM_API_KEY}"
 
@@ -61,9 +62,10 @@ qdrant:
   score_threshold: 0.5
 
 embedding:
-  base_url: "https://vllm-embedding.zalopay.vn"
-  model: "qwen3-embedding-0.6b"
-  vector_size: 1024
+  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
+  model: "qwen/qwen3-embedding-8b"
+  api_key: "${LLM_API_KEY}"
+  vector_size: 4096
 
 onboarding:
   grpc_address: "devgrpc-fin-lending.zalopay.vn:443"
