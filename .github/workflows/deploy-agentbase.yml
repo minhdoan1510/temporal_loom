@@ -84,6 +84,10 @@ jobs:
 
   deploy:
     needs: build-and-push
+    # Deploy is manual-only: it runs when the workflow is triggered by hand
+    # (Run workflow / workflow_dispatch). On a plain push, build-and-push still
+    # runs and pushes the image, but this job is skipped.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Roll out new version on AgentBase
@@ -95,6 +99,10 @@ jobs:
           CLIENT_SECRET: ${{ secrets.AGENTBASE_CLIENT_SECRET }}
           RUNTIME_ID: ${{ secrets.AGENTBASE_RUNTIME_ID }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.VCR_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # vCR pull credentials — supplied to AgentBase as imageAuth so the runtime
+          # can pull the image from the private registry.
+          VCR_USERNAME: ${{ secrets.VCR_USERNAME }}
+          VCR_PASSWORD: ${{ secrets.VCR_PASSWORD }}
           # App env vars injected into the runtime (kept as repo/Actions secrets).
           MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
@@ -184,33 +192,57 @@ jobs:
           fi
           log "version count: $(jq -r '(.listData // []) | length' /tmp/versions.json 2>/dev/null || echo '?')"
           log "latest version: $(jq -r '((.listData // []) | max_by(.version) | .version) // "none"' /tmp/versions.json 2>/dev/null || echo '?')"
+
+          # Build imageAuth for the private vCR registry. The runtime API expects
+          # {enabled, username, password}; prefer the vCR credentials, falling back
+          # to whatever the current version already had.
+          if [ -n "${VCR_USERNAME:-}" ] && [ -n "${VCR_PASSWORD:-}" ]; then
+            IMAGE_AUTH=$(jq -n --arg u "$VCR_USERNAME" --arg p "$VCR_PASSWORD" \
+              '{enabled:true, username:$u, password:$p}')
+            log "imageAuth: explicit vCR credentials (username=${VCR_USERNAME})"
+          else
+            IMAGE_AUTH=$(jq -r '((.listData // []) | max_by(.version) | .imageAuth) // {enabled:true}' /tmp/versions.json)
+            log "imageAuth: carried over from latest version"
+          fi
+
+          # Carry over flavor/autoscaling/networkConfig from the latest version and
+          # only swap the image, env, and imageAuth. PATCH /agent-runtimes/{id}
+          # creates a new version and points the DEFAULT endpoint at it.
           PAYLOAD=$(jq -n \
             --arg img "$IMAGE" \
             --argjson env "$ENV_JSON" \
+            --argjson imageAuth "$IMAGE_AUTH" \
             --slurpfile v /tmp/versions.json \
             '($v[0].listData // [] | max_by(.version)) as $cur
              | {
                  imageUrl: $img,
+                 description: ($cur.description // ""),
+                 command: [],
+                 args: [],
                  environmentVariables: $env,
                  flavorId: ($cur.flavorId // "runtime-s2-general-4x8"),
                  autoscaling: ($cur.autoscaling // {minReplicas:1,maxReplicas:1,cpuUtilization:70,memoryUtilization:70}),
-                 imageAuth: ($cur.imageAuth // {enabled:true, useAgentBaseRegistryCredentials:true}),
-                 networkConfig: ($cur.networkConfig // {mode:"PUBLIC"})
-               }')
-          # Print payload with env values redacted so we can verify the shape safely.
-          log "payload (env redacted):"
-          jq '.environmentVariables |= (with_entries(.value = "***"))' <<<"$PAYLOAD"
+                 imageAuth: $imageAuth
+               }
+             # networkConfig is optional — only include it when the current version has one.
+             + (if ($cur.networkConfig // null) != null then {networkConfig: $cur.networkConfig} else {} end)')
+          # Print payload with env + imageAuth password redacted so we can verify the shape safely.
+          log "payload (secrets redacted):"
+          jq '(.environmentVariables |= (with_entries(.value = "***")))
+              | (if .imageAuth.password then .imageAuth.password = "***" else . end)' <<<"$PAYLOAD"
           echo "::endgroup::"
 
-          echo "::group::Step 3 — Create new runtime version"
-          # 3) Create a new runtime version pointing at the freshly pushed image.
-          log "POST ${API}/agent-runtimes/${RUNTIME_ID}/versions -> ${IMAGE}"
+          echo "::group::Step 3 — Deploy new runtime version (PATCH)"
+          # 3) Update the runtime to point at the freshly pushed image. Per the
+          #    AgentBase runtime API, PATCH /agent-runtimes/{id} creates a new
+          #    version and auto-updates the DEFAULT endpoint.
+          log "PATCH ${API}/agent-runtimes/${RUNTIME_ID} -> ${IMAGE}"
           HTTP=$(curl -sS -o /tmp/resp.json -D /tmp/resp.headers -w '%{http_code}' \
-            -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
+            -X PATCH "${API}/agent-runtimes/${RUNTIME_ID}" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
-          log "create version HTTP=${HTTP}"
+          log "deploy HTTP=${HTTP}"
           log "response body:"
           cat /tmp/resp.json || true
           echo
@@ -222,15 +254,84 @@ jobs:
           fi
           echo "::endgroup::"
 
-          echo "::group::Step 4 — Wait for runtime to become ACTIVE"
-          # 4) Poll until ACTIVE.
+          echo "::group::Step 3.5 — Resolve the freshly created version number"
+          # The PATCH above creates a NEW runtime version. Capture its number so we
+          # can point a brand-new endpoint at exactly this version. Prefer the value
+          # from the PATCH response; fall back to the max version from the list API.
+          NEW_VERSION=$(jq -r '.version // .data.version // empty' /tmp/resp.json 2>/dev/null || true)
+          if [ -z "${NEW_VERSION:-}" ]; then
+            log "PATCH response had no .version — querying versions list"
+            curl -sS -o /tmp/versions.json \
+              "${API}/agent-runtimes/${RUNTIME_ID}/versions?page=1&size=100" \
+              -H "Authorization: Bearer ${TOKEN}" || true
+            NEW_VERSION=$(jq -r '((.listData // []) | max_by(.version) | .version) // empty' /tmp/versions.json 2>/dev/null || true)
+          fi
+          if [ -z "${NEW_VERSION:-}" ]; then
+            echo "Could not determine the new version number"; echo "::endgroup::"; exit 1
+          fi
+          log "new version = ${NEW_VERSION}"
+          echo "::endgroup::"
+
+          echo "::group::Step 4 — Create a NEW endpoint for this version"
+          # Each deploy gets its own endpoint named after the short commit SHA, so
+          # previous endpoints/versions keep serving (no in-place endpoint update).
+          # Endpoint names must be lowercase + hyphens: dep-<short-sha>.
+          SHORT_SHA=$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)
+          EP_NAME="dep-${SHORT_SHA}"
+          log "endpoint name = ${EP_NAME} -> version ${NEW_VERSION}"
+          EP_PAYLOAD=$(jq -n --arg n "$EP_NAME" --argjson v "$NEW_VERSION" '{name:$n, version:$v}')
+          EP_HTTP=$(curl -sS -o /tmp/ep.json -w '%{http_code}' \
+            -X POST "${API}/agent-runtimes/${RUNTIME_ID}/endpoints" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$EP_PAYLOAD")
+          log "create endpoint HTTP=${EP_HTTP}"
+          if { [ "$EP_HTTP" -ge 200 ] && [ "$EP_HTTP" -lt 300 ]; }; then
+            EP_ID=$(jq -r '.id // .data.id // empty' /tmp/ep.json 2>/dev/null || true)
+            log "created endpoint id=${EP_ID:-?}"
+          else
+            # Re-running the same commit hits a name conflict. In that case, find the
+            # existing endpoint by name and repoint it to the new version instead.
+            log "create failed (likely name already exists) — response body:"
+            cat /tmp/ep.json || true; echo
+            curl -sS -o /tmp/eplist.json \
+              "${API}/agent-runtimes/${RUNTIME_ID}/endpoints?page=1&size=100" \
+              -H "Authorization: Bearer ${TOKEN}" || true
+            EP_ID=$(jq -r --arg n "$EP_NAME" '((.listData // []) | map(select(.name==$n)) | .[0].id) // empty' /tmp/eplist.json 2>/dev/null || true)
+            if [ -z "${EP_ID:-}" ]; then
+              echo "Endpoint create failed and no existing endpoint named ${EP_NAME} found"; echo "::endgroup::"; exit 1
+            fi
+            log "endpoint ${EP_NAME} (${EP_ID}) exists — PATCH to version ${NEW_VERSION}"
+            UP_HTTP=$(curl -sS -o /tmp/ep.json -w '%{http_code}' \
+              -X PATCH "${API}/agent-runtimes/${RUNTIME_ID}/endpoints/${EP_ID}?version=${NEW_VERSION}" \
+              -H "Authorization: Bearer ${TOKEN}")
+            log "update endpoint HTTP=${UP_HTTP}"
+            if ! { [ "$UP_HTTP" -ge 200 ] && [ "$UP_HTTP" -lt 300 ]; }; then
+              cat /tmp/ep.json || true; echo
+              echo "Failed to update existing endpoint"; echo "::endgroup::"; exit 1
+            fi
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Step 5 — Wait for the new endpoint to become ACTIVE"
+          # Poll the endpoint (not the runtime) so we track THIS deploy's rollout.
+          # Endpoint statuses mirror runtime ones: CREATING/UPDATING -> ACTIVE | ERROR.
           for i in $(seq 1 60); do
-            STATUS=$(curl -sS "${API}/agent-runtimes/${RUNTIME_ID}" \
-              -H "Authorization: Bearer ${TOKEN}" | jq -r '.status // .data.status // "UNKNOWN"')
-            log "poll ${i}/60 status=${STATUS}"
+            curl -sS -o /tmp/eplist.json \
+              "${API}/agent-runtimes/${RUNTIME_ID}/endpoints?page=1&size=100" \
+              -H "Authorization: Bearer ${TOKEN}" || true
+            EP_JSON=$(jq -c --arg n "$EP_NAME" '((.listData // []) | map(select(.name==$n)) | .[0]) // {}' /tmp/eplist.json 2>/dev/null || echo '{}')
+            STATUS=$(jq -r '.status // "UNKNOWN"' <<<"$EP_JSON")
+            EP_URL=$(jq -r '.url // empty' <<<"$EP_JSON")
+            log "poll ${i}/60 endpoint=${EP_NAME} status=${STATUS}"
             case "$STATUS" in
-              ACTIVE) echo "Deployed."; echo "::endgroup::"; exit 0 ;;
-              FAILED|ERROR) echo "Deployment failed."; echo "::endgroup::"; exit 1 ;;
+              ACTIVE)
+                echo "Deployed endpoint ${EP_NAME} (version ${NEW_VERSION})."
+                [ -n "$EP_URL" ] && echo "Endpoint URL: ${EP_URL}"
+                echo "::endgroup::"; exit 0 ;;
+              ERROR|FAILED|DELETING)
+                log "endpoint detail: ${EP_JSON}"
+                echo "Endpoint rollout failed."; echo "::endgroup::"; exit 1 ;;
             esac
             sleep 10
           done
