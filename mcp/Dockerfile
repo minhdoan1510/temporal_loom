@@ -17,5 +17,5 @@ COPY --from=build /out/mcp-server /app/mcp-server
 COPY config/config.mcp.yaml.tmpl /etc/mcp/config.mcp.yaml.tmpl
 COPY deploy/agentbase/mcp-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
-EXPOSE 7080
+EXPOSE 8080
 ENTRYPOINT ["/app/entrypoint.sh"]

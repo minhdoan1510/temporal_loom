@@ -7,9 +7,12 @@
 # Only the sections the MCP binary reads are present (see mcp/internal/config).
 # No MySQL / Qdrant / LLM are needed by the MCP server.
 
+# Listen on 8080: AgentBase routes external traffic and runs its health check
+# against port 8080 only. Serving on any other port makes the probe fail and the
+# platform SIGTERMs the container.
 mcp_server:
   host: "0.0.0.0"
-  port: 7080
+  port: 8080
   auth_token: "${MCP_AUTH_TOKEN}"
 
 telemetry:
