@@ -103,6 +103,28 @@ jobs:
             echo "Failed to obtain access token"; exit 1
           fi
           log "token acquired (length=${#TOKEN})"
+          # Keep the raw token out of the logs even if Actions masking misses it.
+          echo "::add-mask::${TOKEN}"
+          echo "::endgroup::"
+
+          echo "::group::Step 1.5 — Inspect token identity & scopes"
+          # Decode the JWT payload (2nd segment) to reveal WHO this token is and what
+          # it's allowed to do. Only non-sensitive claims are printed — this is the
+          # key signal for a 403 IAM_PERMISSION_DENIED (read vs write scope).
+          b64url_decode() { local d="${1//-/+}"; d="${d//_//}"; case $(( ${#d} % 4 )) in 2) d="${d}==";; 3) d="${d}=";; esac; printf '%s' "$d" | base64 -d 2>/dev/null; }
+          JWT_PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2)
+          CLAIMS=$(b64url_decode "$JWT_PAYLOAD")
+          if printf '%s' "$CLAIMS" | jq -e . >/dev/null 2>&1; then
+            log "token claims (identity/scope only):"
+            printf '%s' "$CLAIMS" | jq '{
+              sub, client_id, azp, aud, iss,
+              scope, scopes, roles, authorities, permissions,
+              account_id, accountId, projectId, project_id, tenant, org,
+              exp, iat
+            } | with_entries(select(.value != null))'
+          else
+            log "access token is not a decodable JWT (opaque token) — cannot inspect scopes client-side"
+          fi
           echo "::endgroup::"
 
           echo "::group::Step 2 — Build payload (env + carried-over config)"
@@ -124,6 +146,11 @@ jobs:
             "${API}/agent-runtimes/${RUNTIME_ID}/versions?page=1&size=100" \
             -H "Authorization: Bearer ${TOKEN}")
           log "versions endpoint HTTP=${VERS_HTTP}"
+          if ! { [ "$VERS_HTTP" -ge 200 ] && [ "$VERS_HTTP" -lt 300 ]; }; then
+            log "GET versions failed — response body:"
+            cat /tmp/versions.json || true
+            echo
+          fi
           log "version count: $(jq -r '(.listData // []) | length' /tmp/versions.json 2>/dev/null || echo '?')"
           log "latest version: $(jq -r '((.listData // []) | max_by(.version) | .version) // "none"' /tmp/versions.json 2>/dev/null || echo '?')"
           PAYLOAD=$(jq -n \
@@ -147,7 +174,7 @@ jobs:
           echo "::group::Step 3 — Create new runtime version"
           # 3) Create a new runtime version pointing at the freshly pushed image.
           log "POST ${API}/agent-runtimes/${RUNTIME_ID}/versions -> ${IMAGE}"
-          HTTP=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+          HTTP=$(curl -sS -o /tmp/resp.json -D /tmp/resp.headers -w '%{http_code}' \
             -X POST "${API}/agent-runtimes/${RUNTIME_ID}/versions" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
@@ -157,6 +184,8 @@ jobs:
           cat /tmp/resp.json || true
           echo
           if ! { [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ]; }; then
+            log "response headers (for trace/correlation IDs):"
+            cat /tmp/resp.headers || true
             echo "::endgroup::"
             echo "Rollout failed"; exit 1
           fi
