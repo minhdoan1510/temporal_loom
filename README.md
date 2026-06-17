@@ -75,4 +75,4 @@ Temporal Loom cuts processing time from hours to minutes while keeping output
 consistent. Just as important, the platform is built for unlimited
 extensibility: by simply adding new rules, tools, or knowledge sources, any
 domain team can instantly expand the agent's capabilities for its own work,
-with no need to rewrite the system.
+with no need to rewrite the system. 
