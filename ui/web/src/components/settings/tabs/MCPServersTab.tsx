@@ -9,6 +9,9 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  ExternalLink,
+  KeyRound,
+  Unplug,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { MCPServer } from "@/types/api";
@@ -31,6 +34,8 @@ interface ServerForm {
   name: string;
   url: string;
   auth_token: string;
+  auth_type: "bearer" | "oauth";
+  oauth_provider: string;
   description: string;
   enabled: boolean;
 }
@@ -39,7 +44,18 @@ const emptyForm: ServerForm = {
   name: "",
   url: "",
   auth_token: "",
+  auth_type: "bearer",
+  oauth_provider: "",
   description: "",
+  enabled: true,
+};
+
+const notionServer = {
+  name: "notion",
+  url: "https://mcp.notion.com/mcp",
+  auth_type: "oauth" as const,
+  oauth_provider: "notion",
+  description: "Notion workspace MCP",
   enabled: true,
 };
 
@@ -57,6 +73,7 @@ export default function MCPServersTab() {
   const [form, setForm] = useState<ServerForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -69,6 +86,32 @@ export default function MCPServersTab() {
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    const query = window.location.hash.split("?")[1];
+    if (!query) return;
+    const params = new URLSearchParams(query);
+    const status = params.get("mcp_oauth");
+    const server = params.get("server") || "MCP server";
+    if (!status) return;
+    if (status === "connected") {
+      toast.success(`${server} connected`);
+    } else if (status === "connected_sync_failed") {
+      toast.warning(`${server} connected, but tool discovery failed`);
+    } else {
+      toast.error(params.get("message") || `${server} OAuth failed`);
+    }
+    load();
+    params.delete("mcp_oauth");
+    params.delete("server");
+    params.delete("message");
+    const clean = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}#/dashboard${clean ? `?${clean}` : ""}`,
+    );
   }, []);
 
   const toggleExpand = (name: string) => {
@@ -93,6 +136,8 @@ export default function MCPServersTab() {
       name: s.name,
       url: s.url,
       auth_token: "",
+      auth_type: s.auth_type === "oauth" ? "oauth" : "bearer",
+      oauth_provider: s.oauth_provider || "",
       description: s.description,
       enabled: s.enabled,
     });
@@ -111,21 +156,27 @@ export default function MCPServersTab() {
         const patch: {
           url?: string;
           auth_token?: string;
+          auth_type?: "bearer" | "oauth";
+          oauth_provider?: string;
           description?: string;
           enabled?: boolean;
         } = {
           url: form.url,
+          auth_type: form.auth_type,
+          oauth_provider: form.oauth_provider || undefined,
           description: form.description,
           enabled: form.enabled,
         };
-        if (form.auth_token) patch.auth_token = form.auth_token;
+        if (form.auth_type === "bearer" && form.auth_token) patch.auth_token = form.auth_token;
         result = await mcpServers.update(editingName, patch);
         toast.success("MCP server updated");
       } else {
         result = await mcpServers.create({
           name: form.name,
           url: form.url,
-          auth_token: form.auth_token || undefined,
+          auth_token: form.auth_type === "bearer" ? form.auth_token || undefined : undefined,
+          auth_type: form.auth_type,
+          oauth_provider: form.oauth_provider || undefined,
           description: form.description,
           enabled: form.enabled,
         });
@@ -136,6 +187,53 @@ export default function MCPServersTab() {
       load();
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConnectNotion = async () => {
+    setConnecting(notionServer.name);
+    try {
+      const existing = data.find((srv) => srv.name === notionServer.name);
+      if (!existing) {
+        const result = await mcpServers.create(notionServer);
+        if (result.warning) toast.warning(result.warning);
+      } else if (existing.auth_type !== "oauth" || existing.url !== notionServer.url) {
+        const result = await mcpServers.update(notionServer.name, {
+          url: notionServer.url,
+          auth_type: "oauth",
+          oauth_provider: "notion",
+          description: existing.description || notionServer.description,
+          enabled: true,
+        });
+        if (result.warning) toast.warning(result.warning);
+      }
+      const start = await mcpServers.startOAuth(notionServer.name);
+      window.location.assign(start.authorization_url);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleStartOAuth = async (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConnecting(name);
+    try {
+      const start = await mcpServers.startOAuth(name);
+      window.location.assign(start.authorization_url);
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleDisconnectOAuth = async (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConnecting(name);
+    try {
+      await mcpServers.disconnectOAuth(name);
+      toast.success("OAuth disconnected");
+      load();
+    } finally {
+      setConnecting(null);
     }
   };
 
@@ -174,11 +272,26 @@ export default function MCPServersTab() {
             Register external Model Context Protocol servers and expose their tools to the agent.
           </p>
         </div>
-        {canCreate && (
-          <Button onClick={openCreate} className="cursor-pointer gap-2 self-start rounded-lg sm:self-auto">
-            <Plus className="size-4" />
-            Add server
-          </Button>
+        {(canCreate || canUpdate) && (
+          <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            {canCreate && canUpdate && (
+              <Button
+                variant="outline"
+                onClick={handleConnectNotion}
+                disabled={connecting === notionServer.name}
+                className="cursor-pointer gap-2 rounded-lg"
+              >
+                <ExternalLink className="size-4" />
+                {connecting === notionServer.name ? "Connecting…" : "Connect Notion"}
+              </Button>
+            )}
+            {canCreate && (
+              <Button onClick={openCreate} className="cursor-pointer gap-2 rounded-lg">
+                <Plus className="size-4" />
+                Add server
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -229,6 +342,12 @@ export default function MCPServersTab() {
                       {srv.has_auth && (
                         <Badge variant="outline">auth</Badge>
                       )}
+                      {srv.auth_type === "oauth" && (
+                        <Badge variant={srv.oauth_connected ? "secondary" : "outline"} className="gap-1">
+                          <KeyRound className="size-3" />
+                          {srv.oauth_connected ? "OAuth connected" : "OAuth needed"}
+                        </Badge>
+                      )}
                       <Badge variant="outline">
                         {srv.functions.length} tool{srv.functions.length === 1 ? "" : "s"}
                       </Badge>
@@ -255,6 +374,7 @@ export default function MCPServersTab() {
                           disabled={refreshing === srv.name}
                           onClick={(e) => handleRefresh(srv.name, e)}
                           title="Re-discover tools"
+                          aria-label="Re-discover tools"
                         >
                           <RefreshCw
                             className={cn(
@@ -268,9 +388,35 @@ export default function MCPServersTab() {
                           variant="ghost"
                           onClick={(e) => openEdit(srv, e)}
                           title="Edit"
+                          aria-label="Edit MCP server"
                         >
                           <Pencil className="size-4" />
                         </Button>
+                        {srv.auth_type === "oauth" && (
+                          srv.oauth_connected ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={connecting === srv.name}
+                              onClick={(e) => handleDisconnectOAuth(srv.name, e)}
+                              title="Disconnect OAuth"
+                              aria-label="Disconnect OAuth"
+                            >
+                              <Unplug className="size-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              disabled={connecting === srv.name}
+                              onClick={(e) => handleStartOAuth(srv.name, e)}
+                              title="Connect OAuth"
+                              aria-label="Connect OAuth"
+                            >
+                              <ExternalLink className="size-4" />
+                            </Button>
+                          )
+                        )}
                       </>
                     )}
                     {canDelete && (
@@ -279,6 +425,7 @@ export default function MCPServersTab() {
                         variant="ghost"
                         onClick={(e) => handleDelete(srv.name, e)}
                         title="Delete"
+                        aria-label="Delete MCP server"
                       >
                         <Trash2 className="size-4 text-destructive" />
                       </Button>
@@ -399,6 +546,33 @@ export default function MCPServersTab() {
               />
             </div>
             <div>
+              <label className="text-sm font-medium">Authentication</label>
+              <select
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={form.auth_type}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    auth_type: e.target.value === "oauth" ? "oauth" : "bearer",
+                  })
+                }
+              >
+                <option value="bearer">Bearer token</option>
+                <option value="oauth">OAuth</option>
+              </select>
+            </div>
+            {form.auth_type === "oauth" && (
+              <div>
+                <label className="text-sm font-medium">OAuth provider</label>
+                <Input
+                  value={form.oauth_provider}
+                  onChange={(e) => setForm({ ...form, oauth_provider: e.target.value })}
+                  placeholder="notion"
+                />
+              </div>
+            )}
+            {form.auth_type === "bearer" && (
+            <div>
               <label className="text-sm font-medium">
                 Auth token {editingName && <span className="text-muted-foreground">(leave blank to keep current)</span>}
               </label>
@@ -409,6 +583,7 @@ export default function MCPServersTab() {
                 placeholder="Bearer token"
               />
             </div>
+            )}
             <div>
               <label className="text-sm font-medium">Description</label>
               <Textarea

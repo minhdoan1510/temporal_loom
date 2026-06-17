@@ -1,4 +1,4 @@
-import type { SSEEvent } from "@/types/api";
+import type { OpenAIChatCompletionChunk, SSEEvent } from "@/types/api";
 
 export type SSECallback = (event: SSEEvent) => void;
 
@@ -52,6 +52,62 @@ export async function streamSSE(
     }
   } catch (err) {
     onError?.(err instanceof Error ? err : new Error(String(err)));
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function streamOpenAIChatCompletion(
+  response: Response,
+  onDelta: (content: string) => void,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let dataLines: string[] = [];
+
+  const flush = () => {
+    if (dataLines.length === 0) return false;
+    const data = dataLines.join("\n").trim();
+    dataLines = [];
+    if (!data) return false;
+    if (data === "[DONE]") return true;
+
+    const chunk = JSON.parse(data) as OpenAIChatCompletionChunk;
+    if (chunk.error?.message) {
+      throw new Error(chunk.error.message);
+    }
+    const delta = chunk.choices?.[0]?.delta?.content ?? "";
+    if (delta) onDelta(delta);
+    return false;
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          dataLines.push(line.slice(6));
+        } else if (line === "" && flush()) {
+          return;
+        }
+      }
+    }
+
+    if (buffer.startsWith("data: ")) {
+      dataLines.push(buffer.slice(6));
+    }
+    flush();
   } finally {
     reader.releaseLock();
   }

@@ -3,6 +3,7 @@ package mysql
 import (
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -30,7 +31,11 @@ func ck(workspaceID, key string) string {
 	return workspaceID + "\x00" + key
 }
 
-func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy string) *store.SessionData {
+func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy, kind string) *store.SessionData {
+	if kind == "" {
+		kind = "user"
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -40,6 +45,9 @@ func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy string) *sto
 		if cached.CreatedBy == "" && createdBy != "" {
 			cached.CreatedBy = createdBy
 		}
+		if cached.Title == "" {
+			cached.Title = store.DefaultSessionTitle
+		}
 		return cached
 	}
 
@@ -48,6 +56,9 @@ func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy string) *sto
 		if data.CreatedBy == "" && createdBy != "" {
 			data.CreatedBy = createdBy
 		}
+		if data.Title == "" {
+			data.Title = store.DefaultSessionTitle
+		}
 		s.cache[cacheKey] = data
 		return data
 	}
@@ -55,6 +66,7 @@ func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy string) *sto
 	now := time.Now()
 	data = &store.SessionData{
 		Key:       key,
+		Title:     store.DefaultSessionTitle,
 		CreatedBy: createdBy,
 		Messages:  []providers.Message{},
 		Created:   now,
@@ -63,11 +75,12 @@ func (s *MySQLSessionStore) GetOrCreate(workspaceID, key, createdBy string) *sto
 	s.cache[cacheKey] = data
 
 	msgsJSON, _ := json.Marshal([]providers.Message{})
+	metaJSON := sessionMetadata(data)
 	s.db.Exec(
-		`INSERT INTO sessions (session_key, workspace_id, created_by, history, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO sessions (session_key, title, workspace_id, kind, created_by, history, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE session_key = session_key`,
-		key, workspaceID, nilStr(createdBy), msgsJSON, now, now,
+		key, data.Title, workspaceID, kind, nilStr(createdBy), msgsJSON, metaJSON, now, now,
 	)
 
 	return data
@@ -97,6 +110,24 @@ func (s *MySQLSessionStore) AddMessage(workspaceID, key string, msg providers.Me
 
 	data := s.getOrInit(workspaceID, key)
 	data.Messages = append(data.Messages, msg)
+	data.Updated = time.Now()
+}
+
+func (s *MySQLSessionStore) SetMessages(workspaceID, key string, msgs []providers.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data := s.getOrInit(workspaceID, key)
+	data.Messages = msgs
+	data.Updated = time.Now()
+}
+
+func (s *MySQLSessionStore) SetTitle(workspaceID, key, title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data := s.getOrInit(workspaceID, key)
+	data.Title = title
 	data.Updated = time.Now()
 }
 
@@ -223,11 +254,22 @@ func (s *MySQLSessionStore) Delete(workspaceID, key string) error {
 	return err
 }
 
-func (s *MySQLSessionStore) List(workspaceID string) []store.SessionInfo {
-	rows, err := s.db.Query(
-		`SELECT session_key, created_by, JSON_LENGTH(history), created_at, updated_at
-		 FROM sessions WHERE workspace_id = ? ORDER BY updated_at DESC`, workspaceID)
+func (s *MySQLSessionStore) List(workspaceID string, kind string) []store.SessionInfo {
+	var rows *sql.Rows
+	var err error
+	if kind == "all" {
+		rows, err = s.db.Query(
+			`SELECT session_key, title, created_by, JSON_LENGTH(history), created_at, updated_at,
+			        JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.agent_id'))
+			 FROM sessions WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT session_key, title, created_by, JSON_LENGTH(history), created_at, updated_at,
+			        JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.agent_id'))
+			 FROM sessions WHERE workspace_id = ? AND kind = ? ORDER BY created_at DESC`, workspaceID, kind)
+	}
 	if err != nil {
+		slog.Error("session list query failed", "workspace_id", workspaceID, "kind", kind, "error", err)
 		return []store.SessionInfo{}
 	}
 	defer rows.Close()
@@ -235,15 +277,23 @@ func (s *MySQLSessionStore) List(workspaceID string) []store.SessionInfo {
 	result := make([]store.SessionInfo, 0)
 	for rows.Next() {
 		var key string
+		var title sql.NullString
 		var createdBy *string
 		var msgCount int
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&key, &createdBy, &msgCount, &createdAt, &updatedAt); err != nil {
+		var agentID sql.NullString
+		if err := rows.Scan(&key, &title, &createdBy, &msgCount, &createdAt, &updatedAt, &agentID); err != nil {
 			continue
+		}
+		displayTitle := title.String
+		if !title.Valid || displayTitle == "" {
+			displayTitle = store.DefaultSessionTitle
 		}
 		result = append(result, store.SessionInfo{
 			Key:          key,
+			Title:        displayTitle,
 			CreatedBy:    derefStr(createdBy),
+			AgentID:      agentID.String,
 			MessageCount: msgCount,
 			CreatedAt:    createdAt,
 			UpdatedAt:    updatedAt,
@@ -276,27 +326,14 @@ func (s *MySQLSessionStore) Save(workspaceID, key string) error {
 
 	msgsJSON, _ := json.Marshal(snapshot.Messages)
 
-	meta := map[string]interface{}{
-		"model":         snapshot.Model,
-		"provider":      snapshot.Provider,
-		"channel":       snapshot.Channel,
-		"input_tokens":  snapshot.InputTokens,
-		"output_tokens": snapshot.OutputTokens,
-	}
-	for k, v := range snapshot.ExtraMeta {
-		if _, reserved := meta[k]; reserved {
-			continue
-		}
-		meta[k] = v
-	}
-	metaJSON, _ := json.Marshal(meta)
+	metaJSON := sessionMetadata(&snapshot)
 
 	_, err := s.db.Exec(
 		`UPDATE sessions SET
-			history = ?, summary = ?, metadata = ?,
+			title = ?, history = ?, summary = ?, metadata = ?,
 			compaction_count = ?, created_by = COALESCE(created_by, ?), updated_at = ?
 		 WHERE workspace_id = ? AND session_key = ?`,
-		msgsJSON, nilStr(snapshot.Summary), metaJSON,
+		snapshot.Title, msgsJSON, nilStr(snapshot.Summary), metaJSON,
 		snapshot.CompactionCount, nilStr(snapshot.CreatedBy), snapshot.Updated,
 		workspaceID, key,
 	)
@@ -345,16 +382,25 @@ func (s *MySQLSessionStore) SetSessionMetaValue(workspaceID, key, metaKey, value
 	if !ok {
 		return
 	}
+	if metaKey == "title" {
+		data.Title = value
+		data.Updated = time.Now()
+		return
+	}
 	if data.ExtraMeta == nil {
 		data.ExtraMeta = make(map[string]string)
 	}
 	data.ExtraMeta[metaKey] = value
+	data.Updated = time.Now()
 }
 
 func (s *MySQLSessionStore) GetSessionMetaValue(workspaceID, key, metaKey string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if data, ok := s.cache[ck(workspaceID, key)]; ok {
+		if metaKey == "title" {
+			return data.Title
+		}
 		return data.ExtraMeta[metaKey]
 	}
 	return ""
@@ -377,6 +423,7 @@ func (s *MySQLSessionStore) getOrInit(workspaceID, key string) *store.SessionDat
 	now := time.Now()
 	data = &store.SessionData{
 		Key:      key,
+		Title:    store.DefaultSessionTitle,
 		Messages: []providers.Message{},
 		Created:  now,
 		Updated:  now,
@@ -384,17 +431,19 @@ func (s *MySQLSessionStore) getOrInit(workspaceID, key string) *store.SessionDat
 	s.cache[cacheKey] = data
 
 	msgsJSON, _ := json.Marshal([]providers.Message{})
+	metaJSON := sessionMetadata(data)
 	s.db.Exec(
-		`INSERT INTO sessions (session_key, workspace_id, history, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO sessions (session_key, title, workspace_id, kind, history, metadata, created_at, updated_at)
+		 VALUES (?, ?, ?, 'user', ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE session_key = session_key`,
-		key, workspaceID, msgsJSON, now, now,
+		key, data.Title, workspaceID, msgsJSON, metaJSON, now, now,
 	)
 	return data
 }
 
 func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionData {
 	var sessionKey string
+	var title string
 	var createdBy *string
 	var msgsJSON []byte
 	var summary *string
@@ -403,10 +452,10 @@ func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionDa
 	var createdAt, updatedAt time.Time
 
 	err := s.db.QueryRow(
-		`SELECT session_key, created_by, history, summary, metadata,
+		`SELECT session_key, title, created_by, history, summary, metadata,
 		 compaction_count, created_at, updated_at
 		 FROM sessions WHERE workspace_id = ? AND session_key = ?`, workspaceID, key,
-	).Scan(&sessionKey, &createdBy, &msgsJSON, &summary, &metadataJSON,
+	).Scan(&sessionKey, &title, &createdBy, &msgsJSON, &summary, &metadataJSON,
 		&compactionCount, &createdAt, &updatedAt)
 	if err != nil {
 		return nil
@@ -417,12 +466,16 @@ func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionDa
 
 	data := &store.SessionData{
 		Key:             sessionKey,
+		Title:           title,
 		CreatedBy:       derefStr(createdBy),
 		Messages:        msgs,
 		Summary:         derefStr(summary),
 		CompactionCount: compactionCount,
 		Created:         createdAt,
 		Updated:         updatedAt,
+	}
+	if data.Title == "" {
+		data.Title = store.DefaultSessionTitle
 	}
 
 	// Parse metadata JSON
@@ -431,7 +484,7 @@ func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionDa
 		if json.Unmarshal(metadataJSON, &meta) == nil {
 			reserved := map[string]struct{}{
 				"model": {}, "provider": {}, "channel": {},
-				"input_tokens": {}, "output_tokens": {},
+				"title": {}, "input_tokens": {}, "output_tokens": {}, "agent_id": {},
 			}
 			if v, ok := meta["model"].(string); ok {
 				data.Model = v
@@ -441,6 +494,12 @@ func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionDa
 			}
 			if v, ok := meta["channel"].(string); ok {
 				data.Channel = v
+			}
+			if v, ok := meta["agent_id"].(string); ok {
+				data.AgentID = v
+			}
+			if v, ok := meta["title"].(string); ok && data.Title == store.DefaultSessionTitle && v != "" {
+				data.Title = v
 			}
 			if v, ok := meta["input_tokens"].(float64); ok {
 				data.InputTokens = int64(v)
@@ -463,4 +522,24 @@ func (s *MySQLSessionStore) loadFromDB(workspaceID, key string) *store.SessionDa
 	}
 
 	return data
+}
+
+func sessionMetadata(data *store.SessionData) []byte {
+	meta := map[string]interface{}{
+		"model":         data.Model,
+		"provider":      data.Provider,
+		"channel":       data.Channel,
+		"title":         data.Title,
+		"input_tokens":  data.InputTokens,
+		"output_tokens": data.OutputTokens,
+		"agent_id":      data.AgentID,
+	}
+	for k, v := range data.ExtraMeta {
+		if _, reserved := meta[k]; reserved {
+			continue
+		}
+		meta[k] = v
+	}
+	metaJSON, _ := json.Marshal(meta)
+	return metaJSON
 }

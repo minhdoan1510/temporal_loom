@@ -72,14 +72,31 @@ GRANT ALL PRIVILEGES ON \`${MYSQL_DB}\`.* TO '${MYSQL_USER_NAME}'@'%';
 FLUSH PRIVILEGES;
 SQL
 
-  log "applying migrations"
-  for f in $(ls /apps/migrations/*.up.sql | sort); do
-    log "  -> $(basename "$f")"
-    if ! mysql --socket="${INIT_SOCK}" "${MYSQL_DB}" < "$f"; then
-      log "migration failed: $f"
+  # Prefer restoring from the bundled mysqldump (schema + seed data). The dump
+  # DROPs and recreates every table, so it fully defines the schema — no need to
+  # also run migrations. Fall back to applying migrations if the dump is absent.
+  DUMP=/apps/db/agent.dump
+  if [ -f "${DUMP}" ]; then
+    log "restoring database from dump ${DUMP}"
+    # Strip the SET @@GLOBAL.GTID_PURGED line: the source DB had GTID enabled but
+    # the freshly initialized local mysqld runs with GTID_MODE=OFF, where setting
+    # GTID_PURGED errors out and aborts the restore. (The dump is generated with
+    # extended-insert OFF so every row is its own short INSERT — large rows stay
+    # well under the mysql client's line-parsing limits and import cleanly.)
+    if ! grep -v '^SET @@GLOBAL.GTID_PURGED' "${DUMP}" | mysql --socket="${INIT_SOCK}" "${MYSQL_DB}"; then
+      log "restore failed: ${DUMP}"
       exit 1
     fi
-  done
+  else
+    log "no dump found; applying migrations"
+    for f in $(ls /apps/migrations/*.up.sql | sort); do
+      log "  -> $(basename "$f")"
+      if ! mysql --socket="${INIT_SOCK}" "${MYSQL_DB}" < "$f"; then
+        log "migration failed: $f"
+        exit 1
+      fi
+    done
+  fi
 
   log "stopping temporary mysqld"
   mysqladmin --socket="${INIT_SOCK}" shutdown

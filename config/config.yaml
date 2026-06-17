@@ -61,6 +61,17 @@ confluence:
   url: "https://confluence.zalopay.vn"
   api_key: {{ fin.lending.cs_tool.confluence.api_key }}
 
+# Mail MCP (send_mail) — Resend transactional email API.
+mail:
+  resend_api_key: {{ fin.lending.cs_tool.mail.resend_api_key }}
+  from_email: "onboarding@resend.dev"
+
+# Data warehouse MCP (query_sql). Mock mode synthesizes rows via the `llm:`
+# endpoint above; set mock=false once a real warehouse is wired in.
+datawarehouse:
+  mock: true
+  model: ""
+
 # translator:
 #   model: "gemini/gemini-3-flash-preview"
 #   base_url: "https://litellm.zalopay.vn/v1"

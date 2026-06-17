@@ -1,15 +1,8 @@
 import { useState, useEffect } from "react";
 import {
-  ChevronDown,
-  ChevronRight,
   Wrench,
-  Check,
-  X,
-  Loader2,
 } from "lucide-react";
 import type { ToolCall, ThinkingStep } from "@/stores/chat";
-import { cn } from "@/lib/utils";
-import Prose from "@/components/markdown/Prose";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +10,14 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  ThinkingSteps,
+  ThinkingStepsHeader,
+  ThinkingStepsContent,
+  ThinkingStep as FluidThinkingStep,
+} from "@/components/chat/ThinkingSteps";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import PhysicsGridSpinner, { type SpinnerProfile } from "@/components/ui/PhysicsGridSpinner";
 
 interface ThinkingBlockProps {
   steps: ThinkingStep[];
@@ -24,6 +25,26 @@ interface ThinkingBlockProps {
   startTime: number;
   isActive: boolean;
   livePreview?: string;
+}
+
+function getStreamingProfile(toolCallsCount: number): SpinnerProfile {
+  const cycle = toolCallsCount % 6;
+  switch (cycle) {
+    case 0:
+      return "glitch-gold";
+    case 1:
+      return "cobalt-breath";
+    case 2:
+      return "digital-pulse";
+    case 3:
+      return "rebound";
+    case 4:
+      return "fluid-wave";
+    case 5:
+      return "mono-scanner";
+    default:
+      return "glitch-gold";
+  }
 }
 
 export default function ThinkingBlock({
@@ -36,6 +57,13 @@ export default function ThinkingBlock({
   const [expanded, setExpanded] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [selectedTool, setSelectedTool] = useState<ToolCall | null>(null);
+  const [startIndex, setStartIndex] = useState(0);
+
+  useEffect(() => {
+    if (isActive) {
+      setStartIndex(Math.floor(Math.random() * 6));
+    }
+  }, [isActive, startTime]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -51,12 +79,7 @@ export default function ThinkingBlock({
     }
   }, [isActive, startTime]);
 
-  const formatTime = (s: number) => {
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return `${m}m ${rem}s`;
-  };
+
 
   const hasAnyRunning = toolCalls.some((tc) => tc.status === "running");
   const hasSteps = steps.length > 0;
@@ -67,8 +90,6 @@ export default function ThinkingBlock({
       ? "Working"
       : "Thinking";
 
-  // Compute a one-line live preview (only while active and collapsed).
-  // Priority: currently running tool > latest text step > truncated livePreview > default hint.
   let previewText: string | null = null;
   if (isActive) {
     const runningTool = toolCalls.find((tc) => tc.status === "running");
@@ -86,86 +107,91 @@ export default function ThinkingBlock({
         previewText = "Analyzing your request...";
       }
     }
-    if (previewText && previewText.length > 120) {
-      previewText = previewText.slice(0, 120) + "...";
+    if (previewText && previewText.length > 80) {
+      previewText = previewText.slice(0, 80) + "...";
     }
   }
 
+  const currentProfile = getStreamingProfile(startIndex + toolCalls.length);
+
   return (
-    <div className="my-2">
-      <div className="flex min-w-0 items-center gap-2.5 px-3 py-2.5 text-sm text-muted-foreground">
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={() => setExpanded(!expanded)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") setExpanded(!expanded);
-          }}
-          className="flex cursor-pointer items-center gap-2.5 underline decoration-dashed decoration-muted-foreground/30 underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground/50"
-        >
-          {expanded ? (
-            <ChevronDown className="size-4 text-muted-foreground/60" />
-          ) : (
-            <ChevronRight className="size-4 text-muted-foreground/60" />
-          )}
-
-          <span className="relative flex size-2">
-            <span
-              className={cn(
-                "absolute inline-flex h-full w-full rounded-full opacity-75",
-                isActive ? "bg-primary animate-ping" : "bg-primary"
-              )}
-            />
-            <span className="relative inline-flex size-2 rounded-full bg-primary" />
-          </span>
-
-          <span className="font-medium text-foreground/80">{label}</span>
-        </span>
-        {(isActive || elapsed > 0) && (
-          <>
-            <span className="text-muted-foreground/50">&middot;</span>
-            <span className="text-xs text-muted-foreground/60">
-              {formatTime(elapsed)}
-            </span>
-          </>
-        )}
-        {!expanded && previewText && (
-          <>
-            <span className="hidden text-muted-foreground/50 sm:inline">&middot;</span>
-            <span className="hidden min-w-0 flex-1 truncate text-xs italic text-muted-foreground/60 sm:inline">
-              {previewText}
-            </span>
-          </>
-        )}
-      </div>
-
-      {expanded && (
-        <div className="ml-6 mt-1 space-y-2 border-l-2 border-border/30 pl-4">
-          {steps.map((step, i) =>
-            step.type === "text" ? (
-              <div
-                key={i}
-                className="text-xs leading-relaxed text-muted-foreground/70"
-              >
-                <Prose content={step.content} />
-              </div>
-            ) : (
-              <ToolCallStep
-                key={i}
-                toolCall={step.toolCall}
-                onSelect={setSelectedTool}
+    <div className="my-0 w-full">
+      <ThinkingSteps open={expanded} onOpenChange={setExpanded} className="w-full max-w-none">
+        <ThinkingStepsHeader className="cursor-pointer">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground select-none">
+            {isActive ? (
+              <ThinkingIndicator
+                showIcon={true}
+                className="p-0 gap-1.5"
+                profile={currentProfile}
               />
-            )
-          )}
+            ) : (
+              <span className="font-semibold text-foreground/80">{label}</span>
+            )}
+            {(isActive || elapsed > 0) && (
+              <span className="text-xs text-muted-foreground/50">
+                ({formatTime(elapsed)})
+              </span>
+            )}
+            {!expanded && previewText && (
+              <span className="hidden min-w-0 flex-1 truncate text-xs italic text-muted-foreground/60 sm:inline max-w-[400px]">
+                &middot; {previewText}
+              </span>
+            )}
+          </div>
+        </ThinkingStepsHeader>
 
-          {isActive && !hasSteps && (
-            <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground/60">
-              <Loader2 className="size-3 animate-spin" />
-              <span>Analyzing your request...</span>
-            </div>
-          )}
-        </div>
-      )}
+        <ThinkingStepsContent>
+          <div className="mt-1 space-y-1 pl-1">
+            {steps.map((step, i) => {
+              const isStepLast = i === steps.length - 1 && !isActive;
+              if (step.type === "text") {
+                const isStepActive = isActive && i === steps.length - 1;
+                return (
+                  <FluidThinkingStep
+                    key={i}
+                    index={i}
+                    label={`Step ${i + 1}`}
+                    description={step.content}
+                    status={isStepActive ? "active" : "complete"}
+                    isLast={isStepLast}
+                    profile={isStepActive ? currentProfile : undefined}
+                  />
+                );
+              } else if (step.toolCall) {
+                const isToolRunning = step.toolCall.status === "running";
+                return (
+                  <FluidThinkingStep
+                    key={i}
+                    index={i}
+                    icon="settings"
+                    label={formatToolName(step.toolCall.name, step.toolCall.status)}
+                    status={isToolRunning ? "active" : "complete"}
+                    isLast={isStepLast}
+                    profile={isToolRunning ? currentProfile : undefined}
+                  >
+                    <ToolCallStepInner
+                      toolCall={step.toolCall}
+                      onSelect={setSelectedTool}
+                    />
+                  </FluidThinkingStep>
+                );
+              }
+              return null;
+            })}
+
+            {isActive && !hasSteps && (
+              <FluidThinkingStep
+                index={0}
+                label="Analyzing your request"
+                status="active"
+                isLast={true}
+                profile={currentProfile}
+              />
+            )}
+          </div>
+        </ThinkingStepsContent>
+      </ThinkingSteps>
 
       {/* Tool detail dialog */}
       <ToolDetailDialog
@@ -176,61 +202,37 @@ export default function ThinkingBlock({
   );
 }
 
-// ─── Tool Call Step ───────────────────────────────────────────────────
+// ─── Tool Call Step Inner ─────────────────────────────────────────────
 
-function ToolCallStep({
+function ToolCallStepInner({
   toolCall,
   onSelect,
 }: {
   toolCall: ToolCall;
   onSelect: (tc: ToolCall) => void;
 }) {
-  const displayName = formatToolName(toolCall.name, toolCall.status);
   const argSummary = getArgSummary(toolCall.arguments);
   const hasDetail = toolCall.arguments || toolCall.result;
 
   return (
-    <div className="flex items-start gap-2 py-1 text-xs text-muted-foreground">
-      <Wrench className="mt-0.5 size-3 shrink-0 text-chart-3/70" />
-      <div className="min-w-0 flex-1">
-        {hasDetail ? (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(toolCall);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                onSelect(toolCall);
-              }
-            }}
-            className="cursor-pointer font-medium underline decoration-dashed decoration-muted-foreground/30 underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground/50"
-          >
-            {displayName}
-          </span>
-        ) : (
-          <span className="font-medium">{displayName}</span>
-        )}
-        {argSummary && (
-          <p className="truncate font-mono text-[11px] text-muted-foreground/50">
-            {argSummary}
-          </p>
-        )}
-      </div>
-      <span className="mt-0.5 shrink-0">
-        {toolCall.status === "running" && (
-          <Loader2 className="size-3 animate-spin text-primary/60" />
-        )}
-        {toolCall.status === "completed" && (
-          <Check className="size-3 text-primary/60" />
-        )}
-        {toolCall.status === "failed" && (
-          <X className="size-3 text-destructive/60" />
-        )}
-      </span>
+    <div className="text-[11px] text-muted-foreground/70 pl-0.5">
+      {argSummary && (
+        <p className="truncate font-mono text-[10px] text-muted-foreground/50">
+          {argSummary}
+        </p>
+      )}
+      {hasDetail && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(toolCall);
+          }}
+          className="mt-1 cursor-pointer font-medium underline decoration-dashed decoration-muted-foreground/30 underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground/50 text-[11px] outline-none"
+        >
+          View details
+        </button>
+      )}
     </div>
   );
 }
@@ -299,7 +301,7 @@ function ToolDetailDialog({
           {/* No result yet */}
           {!toolCall.result && toolCall.status === "running" && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
-              <Loader2 className="size-3 animate-spin" />
+              <PhysicsGridSpinner profile="execute-tool" size={12} className="mr-0.5" />
               <span>Waiting for result...</span>
             </div>
           )}
@@ -361,3 +363,11 @@ function getArgSummary(args?: Record<string, unknown>): string | null {
   }
   return null;
 }
+
+function formatTime(s: number): string {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${rem}s`;
+}
+

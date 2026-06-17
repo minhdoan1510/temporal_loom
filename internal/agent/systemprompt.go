@@ -48,31 +48,31 @@ func BuildSystemPrompt(cfg SystemPromptConfig) string {
 	// 3. Safety
 	lines = append(lines, buildSafetySection()...)
 
-	// 4. Skills (Phase 1c)
+	// 5. Skills (Phase 1c)
 	if cfg.SkillsSummary != "" || cfg.HasSkillSearch {
 		lines = append(lines, buildSkillsSection(cfg.SkillsSummary, cfg.HasSkillSearch)...)
 	}
 
-	// 5. Memory (Phase 1c)
+	// 6. Memory (Phase 1c)
 	if cfg.HasMemory {
 		lines = append(lines, buildMemorySection()...)
 	}
 
-	// 6. Extra system prompt
+	// 7. Extra system prompt
 	if cfg.ExtraPrompt != "" {
 		lines = append(lines, "## Additional Context", "",
 			"<extra_context>", cfg.ExtraPrompt, "</extra_context>", "")
 	}
 
-	// 7. Project Context — remaining context files (persona files already injected early)
+	// 8. Project Context — remaining context files (persona files already injected early)
 	if len(otherFiles) > 0 {
 		lines = append(lines, buildProjectContextSection(otherFiles)...)
 	}
 
-	// 8. Runtime
+	// 9. Runtime
 	lines = append(lines, buildRuntimeSection(cfg.Channel)...)
 
-	// 9. Recency reinforcements — persona reminder at the end
+	// 10. Recency reinforcements — persona reminder at the end
 	if len(personaFiles) > 0 {
 		lines = append(lines, buildPersonaReminder(personaFiles)...)
 	}

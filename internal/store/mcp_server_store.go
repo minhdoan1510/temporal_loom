@@ -8,15 +8,60 @@ import (
 
 // MCPServer is an external MCP endpoint registered by an admin, scoped to a workspace.
 type MCPServer struct {
-	WorkspaceID string     `json:"workspace_id"`
-	Name        string     `json:"name"`
-	URL         string     `json:"url"`
-	AuthToken   string     `json:"auth_token,omitempty"`
-	Enabled     bool       `json:"enabled"`
-	Description string     `json:"description"`
-	LastSynced  *time.Time `json:"last_synced,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	WorkspaceID string          `json:"workspace_id"`
+	Name        string          `json:"name"`
+	URL         string          `json:"url"`
+	AuthToken   string          `json:"auth_token,omitempty"`
+	AuthType    string          `json:"auth_type,omitempty"`
+	OAuthConfig *MCPOAuthConfig `json:"-"`
+	Enabled     bool            `json:"enabled"`
+	Description string          `json:"description"`
+	LastSynced  *time.Time      `json:"last_synced,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+const (
+	MCPAuthBearer = "bearer"
+	MCPAuthOAuth  = "oauth"
+)
+
+// MCPOAuthConfig stores OAuth metadata and credentials for hosted MCP servers.
+// Sensitive fields are encrypted by the concrete store when encryption is enabled.
+type MCPOAuthConfig struct {
+	Provider                string     `json:"provider,omitempty"`
+	ClientID                string     `json:"client_id,omitempty"`
+	ClientSecret            string     `json:"client_secret,omitempty"`
+	TokenEndpointAuthMethod string     `json:"token_endpoint_auth_method,omitempty"`
+	AuthorizationEndpoint   string     `json:"authorization_endpoint,omitempty"`
+	TokenEndpoint           string     `json:"token_endpoint,omitempty"`
+	RegistrationEndpoint    string     `json:"registration_endpoint,omitempty"`
+	Resource                string     `json:"resource,omitempty"`
+	RedirectURI             string     `json:"redirect_uri,omitempty"`
+	Scope                   string     `json:"scope,omitempty"`
+	AccessToken             string     `json:"access_token,omitempty"`
+	RefreshToken            string     `json:"refresh_token,omitempty"`
+	TokenType               string     `json:"token_type,omitempty"`
+	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
+	State                   string     `json:"state,omitempty"`
+	CodeVerifier            string     `json:"code_verifier,omitempty"`
+	StateExpiresAt          *time.Time `json:"state_expires_at,omitempty"`
+}
+
+func (s MCPServer) EffectiveAuthType() string {
+	if s.AuthType != "" {
+		return s.AuthType
+	}
+	if s.OAuthConfig != nil {
+		return MCPAuthOAuth
+	}
+	return MCPAuthBearer
+}
+
+func (s MCPServer) OAuthConnected() bool {
+	return s.EffectiveAuthType() == MCPAuthOAuth &&
+		s.OAuthConfig != nil &&
+		s.OAuthConfig.AccessToken != ""
 }
 
 // MCPFunction is a tool/function discovered on an MCP server via tools/list.

@@ -16,6 +16,15 @@ var authSkipPaths = map[string]bool{
 	"/api/v1/sso/cas":   true,
 }
 
+func isAuthSkipPath(path string) bool {
+	if authSkipPaths[path] {
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v1/workspaces/") &&
+		strings.Contains(path, "/mcp/servers/") &&
+		strings.HasSuffix(path, "/oauth/callback")
+}
+
 // AuthMiddleware verifies JWT bearer tokens using HMAC-SHA256.
 // Checks Authorization header first, then falls back to the "token" cookie.
 // If jwtSecret is empty, authentication is disabled (all requests pass through).
@@ -35,8 +44,8 @@ func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Skip auth for public API paths (set-token, logout)
-			if authSkipPaths[r.URL.Path] {
+			// Skip auth for public API paths and state-bound OAuth callbacks.
+			if isAuthSkipPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}

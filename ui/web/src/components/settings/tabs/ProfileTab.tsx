@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { UserCircle, Shield, Wrench, Plug, ChevronDown, LogOut, Palette, Sun, Moon, Monitor, X } from "lucide-react";
+import { UserCircle, Shield, Wrench, Plug, ChevronDown, LogOut, Palette, Sun, Moon, Monitor } from "lucide-react";
 import type { UserProfile, AllowedTool } from "@/types/api";
 import { rbacApi, auth } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -178,7 +178,7 @@ export default function ProfileTab() {
 
       {/* Theme Section */}
       <Section title="Theme & Accent" icon={<Palette className="size-4" />}>
-        <div className="rounded-2xl border border-neutral-200/60 bg-neutral-50/50 dark:bg-neutral-900/10 p-5 space-y-5 text-foreground">
+        <div className="rounded-2xl border bg-neutral-50/50 dark:bg-neutral-900/10 p-5 space-y-5 text-foreground">
           {/* Theme Mode Selector Row */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-200/60 dark:border-neutral-800/80">
             <div>
@@ -302,20 +302,6 @@ export default function ProfileTab() {
                 );
               })}
             </div>
-
-            {/* Button to trigger Customize Modal Dialog */}
-            {theme === "custom" && (
-              <div className="flex justify-center pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPickerOpen(true)}
-                  className="text-xs cursor-pointer gap-1.5"
-                >
-                  <Palette className="size-3.5" /> Customize Color...
-                </Button>
-              </div>
-            )}
           </div>
         </div>
       </Section>
@@ -409,28 +395,17 @@ export default function ProfileTab() {
       {/* Custom Theme Color Picker Modal Dialog */}
       <Dialog.Root open={pickerOpen} onOpenChange={setPickerOpen}>
         <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/35 backdrop-blur-xs transition-all duration-200" />
-          <Dialog.Popup className="fixed top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%] z-[70] w-full max-w-md p-6 rounded-2xl border border-border bg-background shadow-2xl transition-all outline-none duration-300 flex flex-col text-foreground gap-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Dialog.Title className="text-base font-bold tracking-tight text-foreground">
-                  Custom Theme Color Dial
-                </Dialog.Title>
-                <Dialog.Description className="text-xs text-muted-foreground mt-0.5">
-                  Pick a shade from the wheel, then slide the arc to tune its lightness
-                </Dialog.Description>
-              </div>
-              <Dialog.Close className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground cursor-pointer outline-none">
-                <X className="size-4" />
-              </Dialog.Close>
-            </div>
-
-            <div className="py-4 flex justify-center">
+          <Dialog.Backdrop className="color-picker-dialog-backdrop fixed inset-0 z-[60] transition-all duration-200" />
+          <Dialog.Popup
+            aria-label="Custom theme color picker"
+            className="fixed top-[50%] left-[50%] z-[70] flex w-[300px] max-w-[calc(100vw-2rem)] translate-x-[-50%] translate-y-[-50%] flex-col items-center gap-4 bg-transparent text-foreground outline-none transition-all duration-300"
+          >
+            <div className="flex justify-center">
               <CustomColorPicker color={customColor} onChange={setCustomColor} />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
-              <Dialog.Close className="h-8 rounded-md px-4 bg-primary text-primary-foreground hover:bg-primary/90 inline-flex items-center justify-center text-xs font-semibold transition-all cursor-pointer outline-none shadow-sm">
+            <div className="flex w-[220px] justify-center self-start">
+              <Dialog.Close className="inline-flex h-8 items-center justify-center rounded-md bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-sm outline-none transition-all hover:bg-primary/90 cursor-pointer">
                 Done
               </Dialog.Close>
             </div>

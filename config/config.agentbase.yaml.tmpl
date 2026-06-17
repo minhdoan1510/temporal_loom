@@ -77,6 +77,17 @@ confluence:
   url: "https://confluence.zalopay.vn"
   api_key: "${CONFLUENCE_API_KEY}"
 
+# Mail MCP (send_mail) — Resend transactional email API.
+mail:
+  resend_api_key: "123"
+  from_email: "123@example.com"
+# 
+# Data warehouse MCP (query_sql). Mock mode synthesizes rows via the shared
+# `llm:` endpoint above; set mock=false once a real warehouse is wired in.
+datawarehouse:
+  mock: true
+  model: ""
+
 skills:
   cache_refresh_interval: 1m
 

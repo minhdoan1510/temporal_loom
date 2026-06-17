@@ -32,12 +32,13 @@ func NewWorkspacesHandler(s store.WorkspaceStore, contextFiles store.ContextFile
 // admin role so the creator retains full access once roles are defined.
 var tabResources = []string{
 	"tab:sessions:read", "tab:sessions:create", "tab:sessions:delete",
-	"tab:skills:read", "tab:skills:create", "tab:skills:update", "tab:skills:delete",
+	"tab:skills:read", "tab:skills:update", "tab:skills:delete",
 	"tab:context-files:read", "tab:context-files:create", "tab:context-files:update", "tab:context-files:delete",
 	"tab:knowledge:read", "tab:knowledge:create", "tab:knowledge:update", "tab:knowledge:delete",
 	"tab:roles:read", "tab:roles:create", "tab:roles:update", "tab:roles:delete",
 	"tab:mcp:read", "tab:mcp:create", "tab:mcp:update", "tab:mcp:delete",
 	"tab:workspace:read", "tab:workspace:update",
+	"tab:routines:read", "tab:routines:create", "tab:routines:update", "tab:routines:delete", "tab:routines:run",
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -142,6 +143,8 @@ func (h *WorkspacesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err := h.enforcer.CreateRole(ws.ID, rbac.AdminRole, perms); err == nil {
 			_ = h.enforcer.AddMember(ws.ID, rbac.AdminRole, sub)
 		}
+		// Seed routine_bot role with full platform + MCP tool access.
+		h.seedRoutineBotRole(ws.ID)
 	}
 
 	// Seed the workspace's default context files (AGENT.md / IDENTITY.md / SOUL.md).
@@ -153,6 +156,24 @@ func (h *WorkspacesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.WriteJSON(w, http.StatusCreated, ws)
+}
+
+// seedRoutineBotRole creates the routine_bot Casbin role with full platform and
+// MCP tool access, and assigns the routine-bot pseudo-user. Idempotent (CreateRole
+// rejects duplicate role names). Called from Create and backfill migrations.
+func (h *WorkspacesHandler) seedRoutineBotRole(wsID string) {
+	if h.enforcer == nil {
+		return
+	}
+	var perms []string
+	if h.toolsReg != nil {
+		for _, t := range h.toolsReg.AllForWorkspace(wsID) {
+			perms = append(perms, tools.PermissionKeyOf(t))
+		}
+	}
+	if err := h.enforcer.CreateRole(wsID, "routine_bot", perms); err == nil {
+		_ = h.enforcer.AddMember(wsID, "routine_bot", "routine-bot")
+	}
 }
 
 // Update modifies a workspace's name/description.

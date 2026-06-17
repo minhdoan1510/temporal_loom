@@ -26,6 +26,7 @@ type runRequest struct {
 	Message    string `json:"message"`
 	Channel    string `json:"channel"`
 	Stream     bool   `json:"stream"`
+	Kind       string `json:"kind"`
 }
 
 // Run executes the agent loop for a single message.
@@ -49,6 +50,14 @@ func (h *AgentHandler) Run(w http.ResponseWriter, r *http.Request) {
 		body.Channel = "http"
 	}
 
+	kind := body.Kind
+	if kind == "" {
+		kind = "user"
+	} else if kind != "user" && kind != "routine" {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid session kind")
+		return
+	}
+
 	// The user identity is always the authenticated JWT subject — never taken
 	// from the request body, so callers cannot impersonate another user. It is
 	// used both as the session creator and as the run's UserID (e.g. for the
@@ -61,7 +70,7 @@ func (h *AgentHandler) Run(w http.ResponseWriter, r *http.Request) {
 	workspaceID := httputil.WorkspaceFromContext(r.Context())
 
 	runID := uuid.New().String()
-	h.loop.EnsureSession(workspaceID, body.SessionKey, userID)
+	h.loop.EnsureSession(workspaceID, body.SessionKey, userID, kind)
 
 	req := agent.RunRequest{
 		WorkspaceID: workspaceID,

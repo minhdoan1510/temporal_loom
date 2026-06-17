@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Temporal Loom Onboarding</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #060707;
+        --bg-2: #090a0a;
+        --line: rgba(255, 255, 255, 0.1);
+        --line-strong: rgba(255, 255, 255, 0.16);
+        --text: #f4f4f5;
+        --muted: #8b8f98;
+        --dim: #565a62;
+        --panel: rgba(255, 255, 255, 0.045);
+        --panel-strong: rgba(255, 255, 255, 0.09);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--bg);
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "SF Pro Text",
+          "SF Pro Display",
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        letter-spacing: 0;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricprecision;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .page {
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.04), transparent 24rem),
+          linear-gradient(#060707, #060707);
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        border-bottom: 1px solid var(--line);
+        background: rgba(6, 7, 7, 0.78);
+        backdrop-filter: blur(22px);
+      }
+
+      .nav {
+        display: flex;
+        min-height: 58px;
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 14px;
+        font-weight: 750;
+      }
+
+      .brand-mark {
+        display: inline-grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .brand-logo {
+        display: block;
+        width: 150px;
+        height: auto;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 25px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 560;
+      }
+
+      .pill {
+        display: inline-flex;
+        min-height: 34px;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0 15px;
+        font-size: 13px;
+        font-weight: 720;
+        white-space: nowrap;
+      }
+
+      .pill.light {
+        background: #f2f2f3;
+        color: #0b0c0d;
+      }
+
+      .pill.dark {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+
+      .hero {
+        position: relative;
+        border-bottom: 1px solid var(--line);
+        padding: 60px 20px 42px;
+        perspective: 1200px;
+        perspective-origin: 50% 24%;
+        text-align: center;
+      }
+
+      .hero-reveal {
+        opacity: 0;
+        filter: blur(18px);
+        transform: translateY(18px);
+        animation: hero-stagger-reveal 840ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        animation-delay: var(--delay, 0ms);
+        will-change: transform, opacity, filter;
+      }
+
+      .team-badges {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      .team-badge {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        border: 1px solid rgba(74, 222, 128, 0.38);
+        border-radius: 999px;
+        background: rgba(34, 197, 94, 0.16);
+        padding: 0 11px;
+        color: #86efac;
+        font-size: 13px;
+        font-weight: 760;
+        white-space: nowrap;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      .hero-title {
+        max-width: 980px;
+        margin: 20px auto 0;
+        font-size: 62px;
+        font-weight: 780;
+        line-height: 1;
+      }
+
+      .hero-title-line {
+        display: block;
+      }
+
+      .hero-copy {
+        max-width: 700px;
+        margin: 18px auto 0;
+        color: var(--muted);
+        font-size: 17px;
+        font-weight: 540;
+        line-height: 1.58;
+      }
+
+      .hero-actions {
+        display: flex;
+        justify-content: center;
+        margin-top: 22px;
+        gap: 14px;
+      }
+
+      .play {
+        width: 0;
+        height: 0;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
+        border-left: 9px solid currentColor;
+      }
+
+      .product-shot {
+        width: min(1180px, calc(100% - 40px));
+        height: min(38vw, 520px);
+        min-height: 280px;
+        margin: 30px auto 0;
+        overflow: visible;
+        perspective: 1200px;
+        perspective-origin: 50% 0%;
+      }
+
+      .product-shot video {
+        display: block;
+        width: fit-content;
+        height: 100%;
+        object-fit: contain;
+        border-radius: 12px;
+        margin: 0 auto;
+        box-shadow: 0 30px 120px rgba(0, 0, 0, 0.44);
+        animation: hero-video-settle 1100ms cubic-bezier(0.16, 1, 0.3, 1) 420ms both;
+        transform-origin: center 12%;
+        transform-style: preserve-3d;
+        will-change: transform, opacity, filter;
+      }
+
+      @keyframes hero-stagger-reveal {
+        to {
+          opacity: 1;
+          filter: blur(0);
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes hero-video-settle {
+        from {
+          opacity: 0.72;
+          filter: blur(5px) brightness(0.82);
+          transform: translate3d(0, 42px, -180px) rotateX(18deg) scale(0.96);
+        }
+
+        to {
+          opacity: 1;
+          filter: blur(0) brightness(1);
+          transform: translate3d(0, 0, 0) rotateX(0deg) scale(1);
+        }
+      }
+
+      .tag {
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.07);
+        padding: 2px 8px;
+        color: rgba(255, 255, 255, 0.44);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .section {
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 118px 0 0;
+      }
+
+      .features {
+        width: min(1180px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 108px 0 0;
+      }
+
+      .feature-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 32px;
+      }
+
+      .feature-heading h2 {
+        max-width: 500px;
+        font-size: 40px;
+        font-weight: 760;
+        line-height: 1;
+      }
+
+      .feature-heading p {
+        max-width: 460px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      .feature-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 28px;
+      }
+
+      .feature-control {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 9px 13px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 720;
+        transition:
+          border-color 160ms ease,
+          background-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .feature-control:hover,
+      .feature-control:focus-visible {
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        outline: none;
+      }
+
+      .feature-stack {
+        display: grid;
+        gap: 76px;
+        margin-top: 34px;
+        padding-bottom: 34vh;
+      }
+
+      .feature-slide {
+        position: sticky;
+        top: calc(78px + (var(--feature-index) * 14px));
+        z-index: var(--feature-z);
+        width: min(940px, 100%);
+        margin: 0 auto;
+        transform-origin: top center;
+      }
+
+      .feature-slide:nth-child(1) {
+        --feature-index: 0;
+        --feature-z: 10;
+      }
+
+      .feature-slide:nth-child(2) {
+        --feature-index: 1;
+        --feature-z: 20;
+      }
+
+      .feature-slide:nth-child(3) {
+        --feature-index: 2;
+        --feature-z: 30;
+      }
+
+      .feature-slide:nth-child(4) {
+        --feature-index: 3;
+        --feature-z: 40;
+      }
+
+      .feature-slide:nth-child(5) {
+        --feature-index: 4;
+        --feature-z: 50;
+      }
+
+      .feature-card {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 10;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 20px;
+        background: #eeeeef;
+        box-shadow: 0 26px 92px rgba(0, 0, 0, 0.46);
+        filter: brightness(var(--stack-brightness, 1));
+        transform: scale(var(--stack-scale, 1));
+        transition:
+          filter 80ms linear,
+          transform 80ms linear;
+        will-change: transform;
+      }
+
+      .feature-media {
+        position: absolute;
+        inset: 0;
+        background: #eeeeef;
+      }
+
+      .feature-media img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .feature-copy {
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        display: grid;
+        width: fit-content;
+        max-width: min(360px, calc(100% - 32px));
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: start;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 14px;
+        background: rgba(6, 7, 7, 0.58);
+        padding: 14px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(22px) saturate(135%);
+      }
+
+      .feature-kicker {
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .feature-copy h3 {
+        margin-top: 8px;
+        font-size: 20px;
+        font-weight: 760;
+        line-height: 1.08;
+      }
+
+      .feature-copy p {
+        margin-top: 9px;
+        color: rgba(255, 255, 255, 0.74);
+        font-size: 13px;
+        line-height: 1.42;
+      }
+
+      .feature-points {
+        display: none;
+        gap: 7px;
+        margin: 14px 0 0;
+        padding: 0;
+        color: rgba(255, 255, 255, 0.66);
+        font-size: 12px;
+        line-height: 1.45;
+        list-style: none;
+      }
+
+      .feature-points li {
+        position: relative;
+        padding-left: 16px;
+      }
+
+      .feature-points li::before {
+        position: absolute;
+        top: 0.65em;
+        left: 0;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #f2f2f3;
+        content: "";
+      }
+
+      .feature-number {
+        color: rgba(255, 255, 255, 0.24);
+        font-size: 24px;
+        font-weight: 780;
+        line-height: 1;
+      }
+
+      .split-heading {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 80px;
+        align-items: start;
+      }
+
+      .split-heading h2 {
+        max-width: 380px;
+        font-size: 36px;
+        font-weight: 760;
+        line-height: 1;
+      }
+
+      .split-heading p {
+        max-width: 430px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      .work-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        margin-top: 70px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .work-cell {
+        min-height: 360px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        padding: 46px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 45%);
+      }
+
+      .work-cell:nth-child(2n) {
+        border-right: 0;
+      }
+
+      .work-cell:nth-last-child(-n + 2) {
+        border-bottom: 0;
+      }
+
+      .mini-ui {
+        width: min(280px, 100%);
+        min-height: 118px;
+        margin: 0 auto 64px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 8px;
+        background: rgba(16, 18, 20, 0.78);
+        padding: 16px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+      }
+
+      .work-shot {
+        width: min(520px, 100%);
+        aspect-ratio: 1874 / 1650;
+        margin: 0 auto 34px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 10px;
+        background: #090a0a;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+      }
+
+      .work-shot img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .work-shot.partner-performance-shot {
+        aspect-ratio: 1842 / 1196;
+        background: #f3f3f4;
+      }
+
+      .work-shot.partner-errors-shot {
+        aspect-ratio: 800 / 576;
+        background: #f7f7f7;
+      }
+
+      .work-shot.funnel-dropoff-shot {
+        aspect-ratio: 2386 / 1854;
+        background: #f6f6f6;
+      }
+
+      .mini-line {
+        display: flex;
+        min-height: 34px;
+        align-items: center;
+        border-radius: 6px;
+        margin-top: 8px;
+        padding: 0 10px;
+        background: rgba(255, 255, 255, 0.055);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .work-cell h3 {
+        font-size: 15px;
+        font-weight: 760;
+      }
+
+      .work-cell p {
+        max-width: 360px;
+        margin-top: 10px;
+        color: var(--dim);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .workflow-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 24px;
+        margin-top: 72px;
+      }
+
+      .workflow-card {
+        display: flex;
+        min-height: 360px;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 24px;
+      }
+
+      .workflow-card.light {
+        background: #f5f5f5;
+        color: #101112;
+      }
+
+      .workflow-card.blue {
+        background: linear-gradient(145deg, #c6dcff, #e1c3ff);
+        color: #121317;
+      }
+
+      .workflow-card.dark {
+        background: #171819;
+      }
+
+      .workflow-preview {
+        display: flex;
+        min-height: 190px;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .preview-pill {
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.78);
+        padding: 12px 16px;
+        color: #202226;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 16px 50px rgba(0, 0, 0, 0.16);
+      }
+
+      .workflow-card h3 {
+        font-size: 15px;
+        font-weight: 780;
+      }
+
+      .workflow-card p {
+        margin-top: 8px;
+        opacity: 0.68;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .compact-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 28px 34px;
+        margin-top: 70px;
+      }
+
+      .compact-item {
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+      }
+
+      .compact-item h3 {
+        margin-top: 20px;
+        font-size: 14px;
+      }
+
+      .compact-item p {
+        margin-top: 8px;
+        color: var(--dim);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .final {
+        position: relative;
+        margin-top: 128px;
+        overflow: hidden;
+        border-top: 1px solid var(--line);
+        padding: 96px 20px 132px;
+        text-align: center;
+      }
+
+      .signal-field {
+        position: absolute;
+        inset: auto 0 0;
+        height: 260px;
+        opacity: 0.6;
+        background-image:
+          linear-gradient(90deg, transparent 0 47%, rgba(255, 255, 255, 0.16) 48% 52%, transparent 53% 100%),
+          linear-gradient(0deg, transparent 0 47%, rgba(255, 255, 255, 0.1) 48% 52%, transparent 53% 100%);
+        background-size: 44px 44px;
+        mask-image: radial-gradient(circle at 50% 100%, black, transparent 72%);
+      }
+
+      .final-content {
+        position: relative;
+        z-index: 1;
+        max-width: 620px;
+        margin: 0 auto;
+      }
+
+      .final h2 {
+        font-size: 42px;
+        line-height: 1.05;
+      }
+
+      .final p {
+        margin-top: 14px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .final-actions {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      footer {
+        border-top: 1px solid var(--line);
+        padding: 44px 0 54px;
+      }
+
+      .footer-inner {
+        display: grid;
+        width: min(1120px, calc(100% - 40px));
+        margin: 0 auto;
+        grid-template-columns: 1fr repeat(4, 160px);
+        gap: 24px;
+        color: var(--dim);
+        font-size: 12px;
+      }
+
+      .footer-col strong {
+        display: block;
+        margin-bottom: 14px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .footer-col a {
+        display: block;
+        margin-top: 10px;
+      }
+
+      @media (max-width: 900px) {
+        .nav-links {
+          display: none;
+        }
+
+        .hero {
+          padding-top: 72px;
+          padding-bottom: 58px;
+        }
+
+        .hero-title {
+          max-width: 340px;
+          font-size: 40px;
+        }
+
+        .hero-copy {
+          max-width: 300px;
+          font-size: 15px;
+          line-height: 1.55;
+        }
+
+        .product-shot {
+          width: min(680px, calc(100% - 24px));
+          height: 236px;
+          min-height: 236px;
+          margin-top: 30px;
+          border-radius: 16px;
+        }
+
+        .section {
+          padding-top: 92px;
+        }
+
+        .features {
+          width: min(680px, calc(100% - 24px));
+          padding-top: 88px;
+        }
+
+        .feature-heading {
+          display: block;
+        }
+
+        .feature-heading h2 {
+          max-width: 320px;
+          font-size: 32px;
+        }
+
+        .feature-heading p {
+          max-width: 330px;
+          margin-top: 14px;
+          font-size: 15px;
+        }
+
+        .feature-stack {
+          gap: 48px;
+          padding-bottom: 18vh;
+        }
+
+        .feature-slide {
+          top: calc(70px + (var(--feature-index) * 8px));
+        }
+
+        .feature-card {
+          aspect-ratio: 4 / 5;
+        }
+
+        .feature-copy {
+          right: 12px;
+          bottom: 12px;
+          max-width: min(280px, calc(100% - 24px));
+          gap: 10px;
+          padding: 12px;
+        }
+
+        .feature-copy h3 {
+          font-size: 18px;
+        }
+
+        .feature-number {
+          font-size: 22px;
+        }
+
+        .split-heading {
+          gap: 28px;
+        }
+
+        .split-heading p {
+          max-width: 320px;
+          font-size: 15px;
+        }
+
+        .work-cell {
+          min-height: 320px;
+          padding: 34px 26px;
+        }
+
+        .work-cell p {
+          max-width: 280px;
+        }
+
+        .split-heading,
+        .work-grid,
+        .workflow-cards,
+        .compact-grid,
+        .footer-inner {
+          grid-template-columns: 1fr;
+        }
+
+        .work-cell,
+        .work-cell:nth-child(2n),
+        .work-cell:nth-last-child(-n + 2) {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .work-cell:last-child {
+          border-bottom: 0;
+        }
+
+        .final-actions {
+          flex-direction: column;
+          align-items: center;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .hero-reveal,
+        .product-shot video {
+          animation: none;
+          filter: none;
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+
+        .feature-card {
+          filter: none;
+          transform: none;
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <nav class="nav" aria-label="Primary">
+          <a class="brand" href="/">
+            <img class="brand-logo" src="./temporal-loom-logo.svg" alt="Temporal Loom" />
+          </a>
+          <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#delegate">Workspace example</a>
+            <a href="#workflows">Use cases</a>
+            <a href="#build">Build</a>
+            <a href="/#/dashboard">Dashboard</a>
+            <a class="pill light" href="/">Open app</a>
+          </div>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy-block">
+            <div class="team-badges hero-reveal" style="--delay: 60ms" aria-label="Team members">
+              <span class="team-badge">khangldh2</span>
+              <span class="team-badge">minhdc3</span>
+              <span class="team-badge">duylvh</span>
+            </div>
+            <h1 id="hero-title" class="hero-title">
+              <span class="hero-title-line hero-reveal" style="--delay: 150ms">Build agent workspaces</span>
+              <span class="hero-title-line hero-reveal" style="--delay: 240ms">around real workflows.</span>
+            </h1>
+            <p class="hero-copy hero-reveal" style="--delay: 340ms">
+              Temporal Loom lets teams configure focused workspaces with knowledge, tools, settings, and answer-ready chat experiences
+            </p>
+            <div class="hero-actions hero-reveal" style="--delay: 430ms">
+              <a class="pill light" href="/#/dashboard">
+                <span class="play" aria-hidden="true"></span>
+                Open Temporal Loom
+              </a>
+              <a class="pill light" href="#">
+                Vote for us
+              </a>
+            </div>
+          </div>
+
+          <figure class="product-shot" aria-label="Temporal Loom workspace example video">
+            <video autoplay muted loop playsinline preload="metadata" poster="./onboarding-product-preview.png">
+              <source src="./onboarding-product-shot.mp4" type="video/mp4" />
+            </video>
+          </figure>
+        </section>
+
+        <section id="features" class="features" aria-labelledby="features-title">
+          <div class="feature-heading">
+            <h2 id="features-title">Features that keep each answer grounded</h2>
+            <p>
+              Temporal Loom is more than a chat surface. Each workspace can bring its own routines, skills, knowledge, appearance, permissions, and connected tools.
+            </p>
+          </div>
+
+          <div class="feature-controls" aria-label="Feature stack shortcuts">
+            <a class="feature-control" href="#feature-routines">Routine feature</a>
+            <a class="feature-control" href="#feature-skills">Built-in Skills</a>
+            <a class="feature-control" href="#feature-knowledge">Knowledge Base</a>
+            <a class="feature-control" href="#feature-appearance">Appearance</a>
+            <a class="feature-control" href="#feature-mcp">MCP Servers</a>
+          </div>
+
+          <div class="feature-stack" data-card-stack aria-label="Feature screenshots">
+            <article id="feature-routines" class="feature-slide">
+              <div class="feature-card">
+                <div class="feature-media">
+                  <img src="./onboarding-feature-routines.png" alt="Routines page showing scheduled agent runs in the default workspace" />
+                </div>
+                <div class="feature-copy">
+                  <div>
+                    <p class="feature-kicker">Scheduled workflows</p>
+                    <h3>Routine feature</h3>
+                    <p>
+                      Turn repeated team questions into scheduled agent runs, with each routine keeping its timing, status, and execution history in one workspace.
+                    </p>
+                    <ul class="feature-points">
+                      <li>Create recurring checks for CS tickets, partner issues, and operational reports.</li>
+                      <li>Pause, run, or review a routine without leaving the workspace.</li>
+                      <li>Use run history to trace what happened and when the agent last executed.</li>
+                    </ul>
+                  </div>
+                  <div class="feature-number">01</div>
+                </div>
+              </div>
+            </article>
+
+            <article id="feature-skills" class="feature-slide">
+              <div class="feature-card">
+                <div class="feature-media">
+                  <img src="./onboarding-feature-skills.png" alt="Skills page showing built-in skill bundles and create with AI action" />
+                </div>
+                <div class="feature-copy">
+                  <div>
+                    <p class="feature-kicker">Reusable agent abilities</p>
+                    <h3>Built-in Skills feature</h3>
+                    <p>
+                      Manage SKILL.md bundles inside each workspace, then use AI to generate new skills from team workflows without starting from a blank file.
+                    </p>
+                    <ul class="feature-points">
+                      <li>Import, edit, download, or delete reusable skills from one workspace screen.</li>
+                      <li>Create skills with AI so domain workflows become structured agent instructions faster.</li>
+                      <li>Keep skill descriptions visible so teammates know when each skill should be used.</li>
+                    </ul>
+                  </div>
+                  <div class="feature-number">02</div>
+                </div>
+              </div>
+            </article>
+
+            <article id="feature-knowledge" class="feature-slide">
+              <div class="feature-card">
+                <div class="feature-media">
+                  <img src="./onboarding-feature-knowledge.png" alt="Knowledge base settings showing synced cashloan and operation process knowledge bases" />
+                </div>
+                <div class="feature-copy">
+                  <div>
+                    <p class="feature-kicker">Workspace memory</p>
+                    <h3>Knowledge bases for team context</h3>
+                    <p>
+                      Index Confluence or Markdown sources into Qdrant so agents can retrieve approved workspace knowledge before answering.
+                    </p>
+                    <ul class="feature-points">
+                      <li>Track synced knowledge bases, point counts, and last sync date.</li>
+                      <li>Keep product rules, runbooks, and team references scoped to the workspace.</li>
+                      <li>Use the same context across chats, routines, and investigation handoffs.</li>
+                    </ul>
+                  </div>
+                  <div class="feature-number">03</div>
+                </div>
+              </div>
+            </article>
+
+            <article id="feature-appearance" class="feature-slide">
+              <div class="feature-card">
+                <div class="feature-media">
+                  <img src="./onboarding-feature-appearance.png" alt="Appearance settings showing theme mode, accent color, and tab access controls" />
+                </div>
+                <div class="feature-copy">
+                  <div>
+                    <p class="feature-kicker">Workspace control</p>
+                    <h3>Appearance and access per workspace</h3>
+                    <p>
+                      Give admins a single place to set theme mode, workspace accent, and feature permissions without touching code.
+                    </p>
+                    <ul class="feature-points">
+                      <li>Switch between light, dark, and system modes for daily use.</li>
+                      <li>Choose an accent palette that matches the workspace style.</li>
+                      <li>Review tab-level access for sessions, skills, roles, MCP, and knowledge.</li>
+                    </ul>
+                  </div>
+                  <div class="feature-number">04</div>
+                </div>
+              </div>
+            </article>
+
+            <article id="feature-mcp" class="feature-slide">
+              <div class="feature-card">
+                <div class="feature-media">
+                  <img src="./onboarding-feature-mcp.png" alt="MCP server settings showing connected cashloan API, data warehouse, Jira, mail, and OpenSearch tools" />
+                </div>
+                <div class="feature-copy">
+                  <div>
+                    <p class="feature-kicker">Connected tools</p>
+                    <h3>MCP servers expose the tools agents need</h3>
+                    <p>
+                      Register authenticated Model Context Protocol servers so agents can query internal APIs, documents, tickets, and evidence sources.
+                    </p>
+                    <ul class="feature-points">
+                      <li>Connect workspace-specific APIs, data warehouses, Jira, mail, and search tools.</li>
+                      <li>See enabled status, auth mode, tool count, and last sync timestamp.</li>
+                      <li>Add or refresh servers without interrupting the active workspace.</li>
+                    </ul>
+                  </div>
+                  <div class="feature-number">05</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="delegate" class="section">
+          <div class="split-heading">
+            <h2>One workspace example: Lending Claw</h2>
+            <p>
+              Lending Claw is a Temporal Loom workspace configured for Cashloan CS. It turns loan IDs, partner callbacks, and onboarding evidence into visual investigation cards.
+            </p>
+          </div>
+
+          <div class="work-grid">
+            <article class="work-cell">
+              <div class="work-shot">
+                <img src="./onboarding-loan-check.png" alt="TNEX loan status check showing Status 6 waiting for disbursement and a loan timeline" />
+              </div>
+              <h3>Check a loan application</h3>
+              <p>Read onboarding status, partner, amount, contract IDs, and the failing step from one prompt.</p>
+            </article>
+            <article class="work-cell">
+              <div class="work-shot partner-errors-shot">
+                <img src="./onboarding-partner-errors.png" alt="Partner approval rate gauge charts for SHB, CAKE, and TNEX" />
+              </div>
+              <h3>Pinpoint partner errors</h3>
+              <p>Connect callbacks and internal functions so the team can see exactly where the flow broke.</p>
+            </article>
+            <article class="work-cell">
+              <div class="work-shot partner-performance-shot">
+                <img src="./onboarding-partner-performance.png" alt="Partner performance charts comparing disbursement revenue and loan counts across partners" />
+              </div>
+              <h3>Compare partner performance</h3>
+              <p>Create chart-backed readouts for loan count, disbursement amount, and ticket-size differences.</p>
+            </article>
+            <article class="work-cell">
+              <div class="work-shot funnel-dropoff-shot">
+                <img src="./onboarding-funnel-dropoff.png" alt="Cashloan onboarding funnel chart showing conversion from app open to successful disbursement" />
+              </div>
+              <h3>Understand onboarding drop-off</h3>
+              <p>Review the funnel from app open to approval, contract signing, and final disbursement.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="workflows" class="section">
+          <div class="split-heading">
+            <h2>Use cases ready for each workspace</h2>
+            <p>
+              Start with a focused setup like Lending Claw, then adapt the same Temporal Loom workspace model to many use cases: customer services, query report data, marketing, planning, and more.
+            </p>
+          </div>
+
+          <div class="workflow-cards">
+            <article class="workflow-card blue">
+              <div class="workflow-preview">
+                <div class="preview-pill">Customer answer drafted</div>
+              </div>
+              <div>
+                <h3>Customer Services</h3>
+                <p>Summarizes customer context, classifies issues, and drafts the next response from workspace knowledge.</p>
+              </div>
+            </article>
+            <article class="workflow-card dark">
+              <div class="workflow-preview">
+                <div class="preview-pill">Report answer ready</div>
+              </div>
+              <div>
+                <h3>Query Report Data</h3>
+                <p>Lets teams ask questions over report data and get chart-backed readouts for review.</p>
+              </div>
+            </article>
+            <article class="workflow-card light">
+              <div class="workflow-preview">
+                <div class="preview-pill">Campaign brief drafted</div>
+              </div>
+              <div>
+                <h3>Marketing</h3>
+                <p>Turns campaign notes, audience signals, and competitor context into briefs the team can use.</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="compact-grid" aria-label="Additional workflow examples">
+            <article class="compact-item"><span>*</span><h3>Planner</h3><p>Builds milestones, owners, dependencies, and decision notes.</p></article>
+            <article class="compact-item"><span>*</span><h3>Report readout</h3><p>Explains metric movement and prepares summaries for review.</p></article>
+            <article class="compact-item"><span>*</span><h3>Data cleanup</h3><p>Finds mismatched values, duplicates, and records that need follow-up.</p></article>
+            <article class="compact-item"><span>*</span><h3>Evidence summary</h3><p>Turns logs, files, and tool output into a readable timeline.</p></article>
+            <article class="compact-item"><span>*</span><h3>Customer reply</h3><p>Drafts concise updates from the resolved investigation.</p></article>
+            <article class="compact-item"><span>*</span><h3>Source compare</h3><p>Highlights agreement and gaps across internal systems.</p></article>
+            <article class="compact-item"><span>*</span><h3>Status report</h3><p>Packages progress, blockers, and owner actions.</p></article>
+          </div>
+        </section>
+
+        <section id="build" class="final">
+          <div class="signal-field" aria-hidden="true"></div>
+          <div class="final-content">
+            <h2>Create your own Temporal Loom workspace</h2>
+            <p>
+              Keep knowledge, tools, permissions, and chat history scoped to the workspace, then launch the workflow from the dashboard.
+            </p>
+            <div class="final-actions">
+              <a class="pill light" href="/#/dashboard">Open dashboard</a>
+              <a class="pill dark" href="/">Read guidelines</a>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <div class="footer-inner">
+          <div class="brand"><span class="brand-mark" aria-hidden="true">TL</span><span>Temporal Loom</span></div>
+          <div class="footer-col"><strong>Product</strong><a href="/">Dashboard</a><a href="/#/routines">Routines</a><a href="/#/skills">Skills</a></div>
+          <div class="footer-col"><strong>Onboarding</strong><a href="#delegate">Delegate</a><a href="#workflows">Workflows</a><a href="#build">Build</a></div>
+          <div class="footer-col"><strong>Workspace</strong><a href="/#/dashboard">Open app</a><a href="/#/dashboard?settings=knowledge">Knowledge</a><a href="/#/dashboard?settings=context-files">Context</a></div>
+          <div class="footer-col"><strong>Support</strong><a href="/">Documentation</a><a href="/">Guidelines</a><a href="/">Contact</a></div>
+        </div>
+      </footer>
+    </div>
+    <script>
+      const featureStack = document.querySelector("[data-card-stack]");
+      const featureCards = Array.from(featureStack?.querySelectorAll(".feature-card") || []);
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      let featureStackFrame = 0;
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function updateFeatureStack() {
+        featureStackFrame = 0;
+        if (!featureStack) return;
+
+        if (reduceMotion.matches) {
+          featureCards.forEach((card) => {
+            card.style.removeProperty("--stack-scale");
+            card.style.removeProperty("--stack-brightness");
+          });
+          return;
+        }
+
+        const rect = featureStack.getBoundingClientRect();
+        const scrollable = Math.max(featureStack.offsetHeight - window.innerHeight, 1);
+        const progress = clamp((window.innerHeight * 0.08 - rect.top) / scrollable, 0, 1);
+        const cardCount = Math.max(featureCards.length, 1);
+
+        featureCards.forEach((card, index) => {
+          const start = (index / cardCount) * 0.72;
+          const localProgress = clamp((progress - start) / Math.max(1 - start, 0.001), 0, 1);
+          const targetScale = Math.max(0.8, 1 - (cardCount - index - 1) * 0.045);
+          const scale = 1 + (targetScale - 1) * localProgress;
+          const brightness = 1 - localProgress * 0.12;
+
+          card.style.setProperty("--stack-scale", scale.toFixed(4));
+          card.style.setProperty("--stack-brightness", brightness.toFixed(4));
+        });
+      }
+
+      function scheduleFeatureStackUpdate() {
+        if (featureStackFrame) return;
+        featureStackFrame = window.requestAnimationFrame(updateFeatureStack);
+      }
+
+      updateFeatureStack();
+      window.addEventListener("scroll", scheduleFeatureStackUpdate, { passive: true });
+      window.addEventListener("resize", scheduleFeatureStackUpdate);
+      reduceMotion.addEventListener("change", scheduleFeatureStackUpdate);
+    </script>
+  </body>
+</html>

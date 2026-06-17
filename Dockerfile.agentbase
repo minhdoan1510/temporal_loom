@@ -77,6 +77,7 @@ COPY --from=go-builder /build/app ./lending-claw
 COPY --from=mcp-builder /build/mcp ./mcp
 COPY --from=fe-builder /fe/dist ./web
 COPY migrations/ ./migrations/
+COPY db/ ./db/
 COPY config/config.agentbase.yaml.tmpl ./config/config.agentbase.yaml.tmpl
 COPY deploy/agentbase/ ./deploy/agentbase/
 

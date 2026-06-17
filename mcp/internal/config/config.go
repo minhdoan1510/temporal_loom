@@ -8,11 +8,14 @@ import (
 )
 
 type Config struct {
-	MCPServer  MCPServerConfig  `yaml:"mcp_server"`
-	Telemetry  TelemetryConfig  `yaml:"telemetry"`
-	Jira       JiraConfig       `yaml:"jira"`
-	OpenSearch OpenSearchConfig `yaml:"opensearch"`
-	Onboarding OnboardingConfig `yaml:"onboarding"`
+	MCPServer     MCPServerConfig     `yaml:"mcp_server"`
+	Telemetry     TelemetryConfig     `yaml:"telemetry"`
+	Jira          JiraConfig          `yaml:"jira"`
+	OpenSearch    OpenSearchConfig    `yaml:"opensearch"`
+	Onboarding    OnboardingConfig    `yaml:"onboarding"`
+	LLM           LLMConfig           `yaml:"llm"`
+	Mail          MailConfig          `yaml:"mail"`
+	Datawarehouse DatawarehouseConfig `yaml:"datawarehouse"`
 }
 
 type TelemetryConfig struct {
@@ -44,6 +47,29 @@ type OnboardingConfig struct {
 	GRPCSecure  bool   `yaml:"grpc_secure"`
 	ClientID    string `yaml:"client_id"`
 	ClientKey   string `yaml:"client_key"`
+}
+
+// LLMConfig configures an OpenAI-compatible LLM endpoint (LiteLLM, vLLM, etc.).
+// Shared with the main app's `llm:` config block.
+type LLMConfig struct {
+	Provider string `yaml:"provider"`
+	Model    string `yaml:"model"`
+	BaseURL  string `yaml:"base_url"`
+	APIKey   string `yaml:"api_key"`
+}
+
+// MailConfig configures the Resend transactional email API.
+type MailConfig struct {
+	ResendAPIKey string `yaml:"resend_api_key"`
+	FromEmail    string `yaml:"from_email"`
+}
+
+// DatawarehouseConfig configures the (mock) data warehouse query tool.
+// When Mock is true (default), query_sql returns LLM-synthesized rows instead
+// of hitting a real warehouse. Model overrides the shared LLM model if set.
+type DatawarehouseConfig struct {
+	Mock  bool   `yaml:"mock"`
+	Model string `yaml:"model"`
 }
 
 func Load(path string) (*Config, error) {

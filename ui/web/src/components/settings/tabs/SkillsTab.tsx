@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Zap, Upload, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, Zap, Upload, Download, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import JSZip from "jszip";
 import type { Skill, SkillFile } from "@/types/api";
@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import SkillEditorDialog, { type InitialBundle } from "./SkillEditorDialog";
+import AiCreateSkillDialog from "./AiCreateSkillDialog";
 
 const REFERENCE_EXTS = [
   ".md",
@@ -52,7 +53,6 @@ function commonTopFolder(names: string[]): string {
 
 export default function SkillsTab() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const canCreate = hasPermission("tab:skills:create");
   const canUpdate = hasPermission("tab:skills:update");
   const canDelete = hasPermission("tab:skills:delete");
   const [data, setData] = useState<Skill[]>([]);
@@ -62,6 +62,7 @@ export default function SkillsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [initialBundle, setInitialBundle] = useState<InitialBundle | null>(null);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -80,6 +81,10 @@ export default function SkillsTab() {
     setEditId(null);
     setInitialBundle(null);
     setDialogOpen(true);
+  };
+
+  const openAiCreate = () => {
+    setAiDialogOpen(true);
   };
 
   const openEdit = (skill: Skill, e: React.MouseEvent) => {
@@ -170,27 +175,32 @@ export default function SkillsTab() {
             SKILL.md bundles — click a skill to edit its files
           </p>
         </div>
-        {canCreate && (
-          <div className="flex gap-2 self-start sm:self-auto">
-            <label className="cursor-pointer">
-              <input
-                type="file"
-                accept=".zip,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.html"
-                multiple
-                className="hidden"
-                onChange={handleImport}
-              />
-              <span className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 text-sm font-medium hover:bg-muted/30">
-                <Upload className="size-4" />
-                Import
-              </span>
-            </label>
-            <Button onClick={openCreate} className="cursor-pointer gap-2 rounded-lg">
-              <Plus className="size-4" />
-              New Skill
-            </Button>
-          </div>
-        )}
+        <div className="flex gap-2 self-start sm:self-auto">
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              accept=".zip,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.html"
+              multiple
+              className="hidden"
+              onChange={handleImport}
+            />
+            <span className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 text-sm font-medium hover:bg-muted/30">
+              <Upload className="size-4" />
+              Import
+            </span>
+          </label>
+          <Button
+            onClick={openAiCreate}
+            className="cursor-pointer gap-2 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-md transition-all duration-200"
+          >
+            <Sparkles className="size-4" />
+            Create with AI
+          </Button>
+          <Button onClick={openCreate} className="cursor-pointer gap-2 rounded-lg" variant="outline">
+            <Plus className="size-4" />
+            New Skill
+          </Button>
+        </div>
       </div>
 
       {/* Skills list */}
@@ -275,6 +285,12 @@ export default function SkillsTab() {
         initial={initialBundle}
         canUpdate={canUpdate}
         onOpenChange={setDialogOpen}
+        onSaved={load}
+      />
+
+      <AiCreateSkillDialog
+        open={aiDialogOpen}
+        onOpenChange={setAiDialogOpen}
         onSaved={load}
       />
     </div>

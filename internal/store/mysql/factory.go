@@ -18,5 +18,8 @@ func NewStores(db *sql.DB, encryptionKey string) *store.Stores {
 		Memory:       NewMySQLMemoryStore(db),
 		Knowledge:    NewMySQLKnowledgeStore(db),
 		MCPServers:   NewMySQLMCPServerStore(db, encryptionKey),
+		Routines:     NewMySQLRoutineStore(db),
+		RoutineRuns:  NewMySQLRoutineRunStore(db),
+		Agents:       NewMySQLAgentStore(db),
 	}
 }

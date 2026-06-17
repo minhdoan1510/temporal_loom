@@ -5,7 +5,6 @@ import { X } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import ProfileTab from "./tabs/ProfileTab";
 import WorkspaceTab from "./tabs/WorkspaceTab";
-import SkillsTab from "./tabs/SkillsTab";
 import ContextFilesTab from "./tabs/ContextFilesTab";
 import KnowledgeTab from "./tabs/KnowledgeTab";
 import MCPServersTab from "./tabs/MCPServersTab";
@@ -21,7 +20,6 @@ interface SettingsDialogProps {
 const TABS_CONFIG = [
   { value: "profile", label: "General", tabName: "*" },
   { value: "workspace", label: "Workspace", tabName: "workspace" },
-  { value: "skills", label: "Skills", tabName: "skills" },
   { value: "context-files", label: "Context Files", tabName: "context-files" },
   { value: "knowledge", label: "Knowledge", tabName: "knowledge" },
   { value: "mcp-servers", label: "MCP Servers", tabName: "mcp" },
@@ -94,11 +92,7 @@ export default function SettingsDialog({
                   </Tabs.Panel>
                 )}
 
-                {hasTabAccess("skills") && (
-                  <Tabs.Panel value="skills" className="p-5 md:p-6 outline-none">
-                    <SkillsTab />
-                  </Tabs.Panel>
-                )}
+
 
                 {/* Context Files Tab handles its own scroll container */}
                 {hasTabAccess("context-files") && (

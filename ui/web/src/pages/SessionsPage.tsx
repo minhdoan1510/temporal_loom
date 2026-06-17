@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { Trash2, MessageSquare, Search, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import type { SessionInfo } from "@/types/api";
 import { sessions } from "@/lib/api";
+import { getSessionDisplayTitle } from "@/lib/session-title";
 import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,9 +60,11 @@ export default function SessionsPage() {
 
   const filtered = useMemo(
     () =>
-      data.filter((s) =>
-        s.key.toLowerCase().includes(filter.toLowerCase())
-      ),
+      data.filter((s) => {
+        const normalizedFilter = filter.toLowerCase();
+        const title = getSessionDisplayTitle(s).toLowerCase();
+        return title.includes(normalizedFilter) || s.key.toLowerCase().includes(normalizedFilter);
+      }),
     [data, filter]
   );
 
@@ -155,7 +158,7 @@ export default function SessionsPage() {
             <TableHeader>
               <TableRow className="border-border/50 hover:bg-transparent">
                 <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  Session Key
+                  Session
                 </TableHead>
                 <TableHead className="w-36 text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                   Created By
@@ -178,8 +181,15 @@ export default function SessionsPage() {
                     navigate(`/sessions/${encodeURIComponent(s.key)}`)
                   }
                 >
-                  <TableCell className="max-w-[280px] truncate font-mono text-sm text-foreground">
-                    {s.key}
+                  <TableCell className="max-w-[280px]">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {getSessionDisplayTitle(s)}
+                      </div>
+                      <div className="truncate font-mono text-xs text-muted-foreground">
+                        {s.key}
+                      </div>
+                    </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {s.created_by || "—"}

@@ -5,11 +5,15 @@ import "gitlab.zalopay.vn/fin/lending/lending-claw/internal/providers"
 // SessionStore manages conversation sessions. All methods are scoped to a
 // workspace; the (workspaceID, key) pair identifies a session.
 type SessionStore interface {
-	GetOrCreate(workspaceID, key, createdBy string) *SessionData
+	// GetOrCreate returns an existing session or creates a new one. kind is
+	// "user" or "routine"; empty defaults to "user".
+	GetOrCreate(workspaceID, key, createdBy, kind string) *SessionData
 	// Get returns the session if it exists (cache or DB) WITHOUT creating one.
 	// ok=false if the session does not exist yet.
 	Get(workspaceID, key string) (*SessionData, bool)
 	AddMessage(workspaceID, key string, msg providers.Message)
+	SetMessages(workspaceID, key string, msgs []providers.Message)
+	SetTitle(workspaceID, key, title string)
 	GetHistory(workspaceID, key string) []providers.Message
 	GetSummary(workspaceID, key string) string
 	SetSummary(workspaceID, key, summary string)
@@ -20,7 +24,7 @@ type SessionStore interface {
 	TruncateHistory(workspaceID, key string, keepLast int)
 	Reset(workspaceID, key string)
 	Delete(workspaceID, key string) error
-	List(workspaceID string) []SessionInfo
+	List(workspaceID string, kind string) []SessionInfo
 	Save(workspaceID, key string) error
 
 	// Token calibration: store last known prompt tokens for better estimation

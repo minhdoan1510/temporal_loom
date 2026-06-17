@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	completionapi "gitlab.zalopay.vn/fin/lending/lending-claw/internal/completions"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/memory"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/providers"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/skills"
@@ -234,6 +235,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		RunID:   req.RunID,
 		Payload: map[string]interface{}{
 			"content":        result.Content,
+			"title":          result.Title,
 			"output_preview": outputPreview,
 			"input_tokens":   result.Usage.PromptTokens,
 			"output_tokens":  result.Usage.CompletionTokens,
@@ -543,6 +545,7 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 
 	l.sessions.UpdateMetadata(req.WorkspaceID, req.SessionKey, l.model, l.provider.Name(), req.Channel)
 	l.sessions.AccumulateTokens(req.WorkspaceID, req.SessionKey, int64(totalUsage.PromptTokens), int64(totalUsage.CompletionTokens))
+	title := l.maybeGenerateSessionTitle(ctx, req.WorkspaceID, req.SessionKey, req.Message, finalContent)
 	if err := l.sessions.Save(req.WorkspaceID, req.SessionKey); err != nil {
 		slog.WarnContext(ctx, "failed to save session", "session", req.SessionKey, "error", err)
 	}
@@ -555,10 +558,37 @@ func (l *Loop) runLoop(ctx context.Context, req RunRequest) (*RunResult, error) 
 
 	return &RunResult{
 		Content:    finalContent,
+		Title:      title,
 		RunID:      req.RunID,
 		Iterations: iteration,
 		Usage:      &totalUsage,
 	}, nil
+}
+
+func (l *Loop) maybeGenerateSessionTitle(ctx context.Context, workspaceID, sessionKey, userMessage, assistantMessage string) string {
+	session, ok := l.sessions.Get(workspaceID, sessionKey)
+	if !ok {
+		return ""
+	}
+	if !shouldGenerateSessionTitle(session.Title) {
+		return session.Title
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := completionapi.NewService(l.provider, l.model).Complete(tctx, buildSessionTitleRequest(l.model, userMessage, assistantMessage))
+	if err != nil {
+		slog.WarnContext(tctx, "session title generation failed", "session", sessionKey, "error", err)
+		return session.Title
+	}
+
+	title := cleanSessionTitle(completionapi.CompletionContent(resp))
+	if title == "" {
+		return session.Title
+	}
+	l.sessions.SetTitle(workspaceID, sessionKey, title)
+	return title
 }
 
 // maybeSummarize checks if the session needs auto-summarization and runs it in background.
@@ -668,15 +698,47 @@ func (l *Loop) emit(ctx context.Context, event AgentEvent) {
 	}
 }
 
-// EnsureSession initializes a session if it doesn't exist.
-func (l *Loop) EnsureSession(workspaceID, key, createdBy string) {
+// EnsureSession initializes a session if it doesn't exist. kind is "user" or
+// "routine"; empty defaults to "user".
+func (l *Loop) EnsureSession(workspaceID, key, createdBy, kind string) {
 	if workspaceID == "" {
 		workspaceID = store.DefaultWorkspaceID
 	}
-	l.sessions.GetOrCreate(workspaceID, key, createdBy)
+	l.sessions.GetOrCreate(workspaceID, key, createdBy, kind)
+}
+
+// EnsureSessionWithAgent initializes a session if it doesn't exist and associates/updates its agent.
+func (l *Loop) EnsureSessionWithAgent(workspaceID, key, createdBy, kind, agentID string) {
+	if workspaceID == "" {
+		workspaceID = store.DefaultWorkspaceID
+	}
+	sess := l.sessions.GetOrCreate(workspaceID, key, createdBy, kind)
+	if agentID != "" && sess.AgentID != agentID {
+		sess.AgentID = agentID
+		_ = l.sessions.Save(workspaceID, key)
+	}
 }
 
 // GetCurrentTime returns the current timestamp (for system prompt).
 func GetCurrentTime() time.Time {
 	return time.Now()
+}
+
+// Provider returns the unexported provider field.
+func (l *Loop) Provider() providers.Provider {
+	return l.provider
+}
+
+// Model returns the unexported model field.
+func (l *Loop) Model() string {
+	return l.model
+}
+
+func isAllowed(name string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Bot, KeyRound, LogIn } from "lucide-react";
+import { Bot, KeyRound } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkspacesStore } from "@/stores/workspaces";
 import { auth, rbacApi, sso } from "@/lib/api";
-import { casRedirectUrl, casServiceUrl } from "@/lib/cas";
+import { casServiceUrl } from "@/lib/cas";
 import WorkspaceOnboarding from "./WorkspaceOnboarding";
 import CasLoading from "./CasLoading";
 
@@ -12,6 +12,11 @@ interface TokenGateProps {
 }
 
 type Status = "idle" | "verifying" | "cas" | "onboarding" | "ok";
+
+// Prefilled into the token field on the login screen so users can connect with a
+// single click during the demo. Override by clearing the field and pasting another.
+const DEFAULT_TOKEN =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsIm5hbWUiOiJhZG1pbiIsInJvbGUiOiIiLCJleHAiOjk3ODE2MTMwODgsImlhdCI6MTc4MTUyNjY4OH0.72v51D869B5Gf1ATNJjGpvf7j_H0wkJpxKryxbkZEZs";
 
 // Is this page load the CAS redirect callback (/sso/cas?ticket=...)? The app
 // uses HashRouter, so this is a real path + query string handled here rather
@@ -27,7 +32,7 @@ function detectCasCallback(): boolean {
 export default function TokenGate({ children }: TokenGateProps) {
   const { sub, clearAuth, setPermissions } = useAuthStore();
   const loadWorkspaces = useWorkspacesStore((s) => s.loadWorkspaces);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(DEFAULT_TOKEN);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
 
@@ -170,25 +175,6 @@ export default function TokenGate({ children }: TokenGateProps) {
                 {checking ? "Verifying..." : "Connect"}
               </button>
             </form>
-
-            {/* Divider */}
-            <div className="my-4 flex items-center gap-3">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-
-            {/* CAS SSO */}
-            <button
-              type="button"
-              onClick={() => {
-                window.location.href = casRedirectUrl();
-              }}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background text-sm font-medium text-foreground transition-colors hover:bg-accent"
-            >
-              <LogIn className="size-4" />
-              Log in with CAS
-            </button>
           </>
         )}
       </div>

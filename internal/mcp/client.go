@@ -18,9 +18,10 @@ import (
 // bound to a single MCP endpoint and re-initializes the underlying session
 // transparently if the connection is lost.
 type Conn struct {
-	serverName string
-	url        string
-	authToken  string
+	serverName    string
+	url           string
+	authToken     string
+	tokenProvider tokenProvider
 
 	mu          sync.Mutex
 	client      *mcp.Client
@@ -28,14 +29,28 @@ type Conn struct {
 	initialized bool
 }
 
+type tokenProvider func(context.Context) (string, error)
+
+type ConnOption func(*Conn)
+
+func WithTokenProvider(provider tokenProvider) ConnOption {
+	return func(c *Conn) {
+		c.tokenProvider = provider
+	}
+}
+
 // NewConn creates a new connection wrapper. The transport is not started until
 // the first call (ListTools/CallTool).
-func NewConn(serverName, url, authToken string) *Conn {
-	return &Conn{
+func NewConn(serverName, url, authToken string, opts ...ConnOption) *Conn {
+	conn := &Conn{
 		serverName: serverName,
 		url:        url,
 		authToken:  authToken,
 	}
+	for _, opt := range opts {
+		opt(conn)
+	}
+	return conn
 }
 
 // ServerName returns the operator-assigned name of the MCP server.
@@ -45,16 +60,25 @@ func (c *Conn) ServerName() string { return c.serverName }
 // header and W3C/B3 trace context on every outbound request. Replaces the
 // per-call header function exposed by the previous SDK.
 type injectHeadersTransport struct {
-	base      http.RoundTripper
-	authToken string
+	base          http.RoundTripper
+	authToken     string
+	tokenProvider tokenProvider
 }
 
 func (t *injectHeadersTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Clone so we don't mutate caller-owned headers.
 	clone := req.Clone(req.Context())
 	otel.GetTextMapPropagator().Inject(clone.Context(), propagation.HeaderCarrier(clone.Header))
-	if t.authToken != "" {
-		clone.Header.Set("Authorization", "Bearer "+t.authToken)
+	token := t.authToken
+	if t.tokenProvider != nil {
+		var err error
+		token, err = t.tokenProvider(clone.Context())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if token != "" {
+		clone.Header.Set("Authorization", "Bearer "+token)
 	}
 	return t.base.RoundTrip(clone)
 }
@@ -73,8 +97,9 @@ func (c *Conn) ensureClient(ctx context.Context) error {
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 		Transport: &injectHeadersTransport{
-			base:      http.DefaultTransport,
-			authToken: c.authToken,
+			base:          http.DefaultTransport,
+			authToken:     c.authToken,
+			tokenProvider: c.tokenProvider,
 		},
 	}
 

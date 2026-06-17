@@ -48,16 +48,16 @@ func validateMCPURL(raw string) error {
 }
 
 type mcpServerResp struct {
-	Name        string             `json:"name"`
-	URL         string             `json:"url"`
-	Enabled     bool               `json:"enabled"`
-	Description string             `json:"description"`
-	HasAuth     bool               `json:"has_auth"`
-	LastSynced  *time.Time         `json:"last_synced,omitempty"`
-	CreatedAt   time.Time          `json:"created_at"`
-	UpdatedAt   time.Time          `json:"updated_at"`
+	Name        string              `json:"name"`
+	URL         string              `json:"url"`
+	Enabled     bool                `json:"enabled"`
+	Description string              `json:"description"`
+	HasAuth     bool                `json:"has_auth"`
+	LastSynced  *time.Time          `json:"last_synced,omitempty"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 	Functions   []store.MCPFunction `json:"functions"`
-	Warning     string             `json:"warning,omitempty"`
+	Warning     string              `json:"warning,omitempty"`
 }
 
 func toResp(s store.MCPServer, funcs []store.MCPFunction, warning string) mcpServerResp {
@@ -136,10 +136,6 @@ func (h *MCPServersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	body.URL = strings.TrimSpace(body.URL)
 	if body.Name == "" || body.URL == "" {
 		httputil.WriteError(w, http.StatusBadRequest, "name and url are required")
-		return
-	}
-	if err := validateMCPURL(body.URL); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -328,4 +324,3 @@ func (h *MCPServersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

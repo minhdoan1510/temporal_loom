@@ -36,6 +36,11 @@ export default function CustomColorPicker({ color, onChange }: CustomColorPicker
   const cx = 110;
   const cy = 110;
   const r = 110;
+  const outerDotRadius = 60;
+  const outerDotOffset = 20;
+  const innerDotRadius = 35;
+  const innerDotOffset = 17;
+  const centerDotOffset = 20;
   const minAngle = -35 * (Math.PI / 180); // Top (-35 degrees)
   const maxAngle = 35 * (Math.PI / 180);  // Bottom (35 degrees)
 
@@ -141,20 +146,21 @@ export default function CustomColorPicker({ color, onChange }: CustomColorPicker
         {/* Outer Ring Swatches */}
         {OUTER_DOTS.map((dot, i) => {
           const theta = -Math.PI / 2 + i * (Math.PI / 6);
-          const x = cx + 54 * Math.cos(theta);
-          const y = cy + 54 * Math.sin(theta);
+          const x = cx + outerDotRadius * Math.cos(theta);
+          const y = cy + outerDotRadius * Math.sin(theta);
           const active = isSelected(dot.h, dot.s);
           return (
             <button
-              key={`outer-${i}`}
+              key={`outer-${dot.h}-${dot.s}-${dot.l}`}
               type="button"
+              aria-label={`Select accent color ${dot.h}`}
               onClick={() => onChange({ h: dot.h, s: dot.s, l: dot.l })}
-              className={`w-8.5 h-8.5 rounded-full border border-black/5 dark:border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_8px_rgba(0,0,0,0.12)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
+              className={`w-10 h-10 rounded-full border border-black/5 dark:border-white/10 shadow-[0_2px_4px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_8px_rgba(0,0,0,0.12)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
                 active ? "ring-2.5 ring-white dark:ring-neutral-900 scale-110 z-10" : ""
               }`}
               style={{
-                left: `${x - 17}px`,
-                top: `${y - 17}px`,
+                left: `${x - outerDotOffset}px`,
+                top: `${y - outerDotOffset}px`,
                 backgroundColor: `hsl(${dot.h}, ${dot.s}%, ${dot.l}%)`,
               }}
             />
@@ -164,20 +170,21 @@ export default function CustomColorPicker({ color, onChange }: CustomColorPicker
         {/* Inner Ring Swatches */}
         {INNER_DOTS.map((dot, i) => {
           const theta = -Math.PI / 2 + i * (Math.PI / 6);
-          const x = cx + 29 * Math.cos(theta);
-          const y = cy + 29 * Math.sin(theta);
+          const x = cx + innerDotRadius * Math.cos(theta);
+          const y = cy + innerDotRadius * Math.sin(theta);
           const active = isSelected(dot.h, dot.s);
           return (
             <button
-              key={`inner-${i}`}
+              key={`inner-${dot.h}-${dot.s}-${dot.l}`}
               type="button"
+              aria-label={`Select soft accent color ${dot.h}`}
               onClick={() => onChange({ h: dot.h, s: dot.s, l: dot.l })}
-              className={`w-7 h-7 rounded-full border border-black/5 dark:border-white/10 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_3px_6px_rgba(0,0,0,0.12)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
+              className={`w-8.5 h-8.5 rounded-full border border-black/5 dark:border-white/10 shadow-[0_1px_3px_rgba(0,0,0,0.06)] hover:shadow-[0_3px_6px_rgba(0,0,0,0.12)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
                 active ? "ring-2 ring-white dark:ring-neutral-900 scale-110 z-10" : ""
               }`}
               style={{
-                left: `${x - 14}px`,
-                top: `${y - 14}px`,
+                left: `${x - innerDotOffset}px`,
+                top: `${y - innerDotOffset}px`,
                 backgroundColor: `hsl(${dot.h}, ${dot.s}%, ${dot.l}%)`,
               }}
             />
@@ -187,13 +194,14 @@ export default function CustomColorPicker({ color, onChange }: CustomColorPicker
         {/* Center White Swatch (Monochrome / Ink Mode) */}
         <button
           type="button"
+          aria-label="Select white accent color"
           onClick={() => onChange({ h: 0, s: 0, l: 100 })}
-          className={`w-7.5 h-7.5 rounded-full border border-neutral-200/80 dark:border-neutral-800 shadow-[0_2px_6px_rgba(0,0,0,0.08)] hover:shadow-[0_4px_10px_rgba(0,0,0,0.15)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
+          className={`w-10 h-10 rounded-full border border-neutral-200/80 dark:border-neutral-800 shadow-[0_2px_6px_rgba(0,0,0,0.08)] hover:shadow-[0_4px_10px_rgba(0,0,0,0.15)] cursor-pointer absolute transition-all duration-200 hover:scale-110 active:scale-95 outline-none ${
             color.s === 0 ? "ring-2 ring-neutral-400 dark:ring-neutral-500 scale-115 z-10" : ""
           }`}
           style={{
-            left: `${cx - 15}px`,
-            top: `${cy - 15}px`,
+            left: `${cx - centerDotOffset}px`,
+            top: `${cy - centerDotOffset}px`,
             backgroundColor: "#ffffff",
           }}
         />
@@ -238,7 +246,11 @@ export default function CustomColorPicker({ color, onChange }: CustomColorPicker
           stroke="#dddddd"
           strokeWidth="1.5"
           filter="url(#handle-shadow)"
-          className="pointer-events-auto cursor-grab active:cursor-grabbing hover:scale-110 transition-transform duration-150"
+          className="pointer-events-auto cursor-grab active:cursor-grabbing hover:scale-105 transition-transform duration-150"
+          style={{
+            transformBox: "fill-box",
+            transformOrigin: "center",
+          }}
           onMouseDown={handleMouseDown}
           onTouchStart={handleTouchStart}
         />

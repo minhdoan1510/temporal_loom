@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"time"
 
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/providers"
@@ -30,18 +31,24 @@ type WorkspaceMember struct {
 // (CLI/jira) default to it.
 const DefaultWorkspaceID = "00000000-0000-0000-0000-000000000001"
 
+// DefaultSessionTitle is shown before the first completed assistant response
+// generates a conversation-specific title.
+const DefaultSessionTitle = "Cuộc trò chuyện mới"
+
 // SessionData holds conversation state for one session.
 type SessionData struct {
-	Key             string              `json:"key"`
-	CreatedBy       string              `json:"created_by,omitempty"`
-	Messages        []providers.Message `json:"messages"`
-	Summary         string              `json:"summary,omitempty"`
-	Model           string              `json:"model,omitempty"`
-	Provider        string              `json:"provider,omitempty"`
-	Channel         string              `json:"channel,omitempty"`
-	UserID          string              `json:"user_id,omitempty"`
-	InputTokens     int64               `json:"input_tokens,omitempty"`
-	OutputTokens    int64               `json:"output_tokens,omitempty"`
+	Key              string              `json:"key"`
+	Title            string              `json:"title,omitempty"`
+	CreatedBy        string              `json:"created_by,omitempty"`
+	AgentID          string              `json:"agent_id,omitempty"`
+	Messages         []providers.Message `json:"messages"`
+	Summary          string              `json:"summary,omitempty"`
+	Model            string              `json:"model,omitempty"`
+	Provider         string              `json:"provider,omitempty"`
+	Channel          string              `json:"channel,omitempty"`
+	UserID           string              `json:"user_id,omitempty"`
+	InputTokens      int64               `json:"input_tokens,omitempty"`
+	OutputTokens     int64               `json:"output_tokens,omitempty"`
 	CompactionCount  int                 `json:"compaction_count,omitempty"`
 	LastPromptTokens int                 `json:"last_prompt_tokens,omitempty"`
 	LastMessageCount int                 `json:"last_message_count,omitempty"`
@@ -54,7 +61,9 @@ type SessionData struct {
 // SessionInfo is lightweight session metadata for listing.
 type SessionInfo struct {
 	Key          string    `json:"key"`
+	Title        string    `json:"title,omitempty"`
 	CreatedBy    string    `json:"created_by,omitempty"`
+	AgentID      string    `json:"agent_id,omitempty"`
 	MessageCount int       `json:"message_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -123,4 +132,29 @@ type KnowledgeBase struct {
 	CreatedBy    *string    `json:"created_by,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// Agent represents a workspace-scoped agent configuration.
+type Agent struct {
+	ID                string    `json:"id"`
+	WorkspaceID       string    `json:"workspace_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	SystemInstruction string    `json:"system_instruction"`
+	Skills            []string  `json:"skills"`      // JSON array of skill names/IDs
+	MemoryAccess      bool      `json:"memory_access"`
+	MCPServers        []string  `json:"mcp_servers"`  // JSON array of MCP server names
+	Tools             []string  `json:"tools"`        // JSON array of allowed platform/MCP tool names
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// AgentStore manages Agent configs in the persistent store.
+type AgentStore interface {
+	List(ctx context.Context, workspaceID string) ([]Agent, error)
+	Get(ctx context.Context, workspaceID, name string) (*Agent, error)
+	GetByID(ctx context.Context, workspaceID, id string) (*Agent, error)
+	Create(ctx context.Context, workspaceID string, agent *Agent) error
+	Update(ctx context.Context, workspaceID string, agent *Agent) error
+	Delete(ctx context.Context, workspaceID, id string) error
 }

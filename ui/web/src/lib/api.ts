@@ -9,10 +9,18 @@ import type {
   Role,
   KnowledgeBase,
   MCPServer,
+  MCPOAuthStart,
   MCPFunction,
   UserProfile,
   Workspace,
   WorkspaceMember,
+  Routine,
+  RoutineRun,
+  CreateRoutineResp,
+  FireRunResp,
+  Message,
+  OpenAIChatCompletionRequest,
+  OpenAIChatCompletionResponse,
 } from "@/types/api";
 
 const BASE = "/api/v1";
@@ -66,8 +74,7 @@ export const auth = {
       method: "POST",
       body: JSON.stringify({ token }),
     }),
-  logout: () =>
-    request<void>("/logout", { method: "POST" }),
+  logout: () => request<void>("/logout", { method: "POST" }),
 };
 
 // CAS SSO — validate a service ticket; the backend sets auth cookies on success.
@@ -82,7 +89,8 @@ export const sso = {
 // Workspaces (NOT workspace-scoped — these manage the workspaces themselves)
 export const workspaces = {
   list: () => request<Workspace[]>("/workspaces"),
-  get: (id: string) => request<Workspace>(`/workspaces/${encodeURIComponent(id)}`),
+  get: (id: string) =>
+    request<Workspace>(`/workspaces/${encodeURIComponent(id)}`),
   create: (data: { name: string; slug?: string; description?: string }) =>
     request<Workspace>("/workspaces", {
       method: "POST",
@@ -94,7 +102,9 @@ export const workspaces = {
       body: JSON.stringify(data),
     }),
   delete: (id: string) =>
-    request<void>(`/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    request<void>(`/workspaces/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   members: (id: string) =>
     request<WorkspaceMember[]>(`/workspaces/${encodeURIComponent(id)}/members`),
   addMember: (id: string, sub: string, roles: string[]) =>
@@ -105,19 +115,24 @@ export const workspaces = {
   setMemberRoles: (id: string, sub: string, roles: string[]) =>
     request<void>(
       `/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(sub)}/roles`,
-      { method: "PUT", body: JSON.stringify({ roles }) }
+      { method: "PUT", body: JSON.stringify({ roles }) },
     ),
   removeMember: (id: string, sub: string) =>
     request<void>(
       `/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(sub)}`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     ),
 };
 
 // Sessions (workspace-scoped)
 export const sessions = {
-  list: () => request<SessionInfo[]>(wsPath("/sessions")),
+  list: (kind?: string) => request<SessionInfo[]>(wsPath(`/sessions${kind ? `?kind=${kind}` : ""}`)),
   get: (key: string) => request<SessionData>(wsPath(`/sessions/${encodeURIComponent(key)}`)),
+  update: (key: string, data: { messages?: Message[]; extra_meta?: Record<string, string> }) =>
+    request<SessionData>(wsPath(`/sessions/${encodeURIComponent(key)}`), {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
   delete: (key: string) => request<void>(wsPath(`/sessions/${encodeURIComponent(key)}`), { method: "DELETE" }),
 };
 
@@ -130,6 +145,26 @@ export const agent = {
     }),
   runStream: (req: RunRequest, signal?: AbortSignal): Promise<Response> =>
     fetch(`${BASE}${wsPath("/agent/run")}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...req, stream: true }),
+      signal,
+    }),
+};
+
+// OpenAI-compatible raw chat completions (workspace-scoped, no tools).
+export const openai = {
+  chatCompletions: (req: OpenAIChatCompletionRequest) =>
+    request<OpenAIChatCompletionResponse>(wsPath("/chat/completions"), {
+      method: "POST",
+      body: JSON.stringify({ ...req, stream: false }),
+    }),
+  chatCompletionsStream: (
+    req: OpenAIChatCompletionRequest,
+    signal?: AbortSignal,
+  ): Promise<Response> =>
+    fetch(`${BASE}${wsPath("/chat/completions")}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -154,6 +189,17 @@ export const skills = {
     }),
   delete: (id: string) =>
     request<void>(wsPath(`/skills/${id}`), { method: "DELETE" }),
+  generateStream: (
+    req: { messages: Message[] },
+    signal?: AbortSignal,
+  ): Promise<Response> =>
+    fetch(`${BASE}${wsPath("/skills/generate")}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+      signal,
+    }),
 };
 
 // Context Files (workspace-scoped)
@@ -172,7 +218,9 @@ export const contextFiles = {
   delete: (scope: string, path: string, userId?: string) => {
     const params = new URLSearchParams({ scope, path });
     if (userId) params.set("user_id", userId);
-    return request<void>(wsPath(`/context-files?${params}`), { method: "DELETE" });
+    return request<void>(wsPath(`/context-files?${params}`), {
+      method: "DELETE",
+    });
   },
 };
 
@@ -208,6 +256,8 @@ export const mcpServers = {
     name: string;
     url: string;
     auth_token?: string;
+    auth_type?: "bearer" | "oauth" | string;
+    oauth_provider?: string;
     description?: string;
     enabled?: boolean;
   }) =>
@@ -220,25 +270,42 @@ export const mcpServers = {
     data: {
       url?: string;
       auth_token?: string;
+      auth_type?: "bearer" | "oauth" | string;
+      oauth_provider?: string;
       description?: string;
       enabled?: boolean;
-    }
+    },
   ) =>
     request<MCPServer>(wsPath(`/mcp/servers/${encodeURIComponent(name)}`), {
       method: "PUT",
       body: JSON.stringify(data),
     }),
   refresh: (name: string) =>
-    request<MCPServer>(wsPath(`/mcp/servers/${encodeURIComponent(name)}/refresh`), {
-      method: "POST",
-    }),
+    request<MCPServer>(
+      wsPath(`/mcp/servers/${encodeURIComponent(name)}/refresh`),
+      {
+        method: "POST",
+      },
+    ),
   setFunctionEnabled: (name: string, fn: string, enabled: boolean) =>
     request<MCPFunction>(
-      wsPath(`/mcp/servers/${encodeURIComponent(name)}/functions/${encodeURIComponent(fn)}`),
+      wsPath(
+        `/mcp/servers/${encodeURIComponent(name)}/functions/${encodeURIComponent(fn)}`,
+      ),
       {
         method: "PATCH",
         body: JSON.stringify({ enabled }),
-      }
+      },
+    ),
+  startOAuth: (name: string) =>
+    request<MCPOAuthStart>(
+      wsPath(`/mcp/servers/${encodeURIComponent(name)}/oauth/start`),
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  disconnectOAuth: (name: string) =>
+    request<MCPServer>(
+      wsPath(`/mcp/servers/${encodeURIComponent(name)}/oauth/disconnect`),
+      { method: "POST" },
     ),
   delete: (name: string) =>
     request<void>(wsPath(`/mcp/servers/${encodeURIComponent(name)}`), {
@@ -265,6 +332,37 @@ export const knowledge = {
   sync: (id: string, reset?: boolean) =>
     request<{ status: string }>(
       wsPath(`/knowledge/${id}/sync${reset ? "?reset=true" : ""}`),
-      { method: "POST" }
+      { method: "POST" },
     ),
+};
+
+// Routines (workspace-scoped)
+export const routines = {
+  list: () => request<Routine[]>(wsPath("/routines")),
+  get: (id: string) => request<Routine>(wsPath(`/routines/${id}`)),
+  create: (data: Partial<Routine> & { generate_token?: boolean }) =>
+    request<CreateRoutineResp>(wsPath("/routines"), {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: Partial<Routine> & { generate_token?: boolean }) =>
+    request<CreateRoutineResp>(wsPath(`/routines/${id}`), {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    request<void>(wsPath(`/routines/${id}`), { method: "DELETE" }),
+  listRuns: (id: string, limit = 100) =>
+    request<RoutineRun[]>(wsPath(`/routines/${id}/runs?limit=${limit}`)),
+  fire: (id: string, text?: string) =>
+    request<FireRunResp>(wsPath(`/routines/${id}/fire`), {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  rotateToken: (id: string) =>
+    request<{ fire_token: string }>(wsPath(`/routines/${id}/rotate-token`), {
+      method: "POST",
+    }),
+  revokeToken: (id: string) =>
+    request<void>(wsPath(`/routines/${id}/revoke-token`), { method: "DELETE" }),
 };

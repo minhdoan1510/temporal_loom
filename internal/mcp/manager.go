@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
+	"time"
 
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/store"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/tools"
@@ -79,7 +81,7 @@ func (m *Manager) LoadFromCache(ctx context.Context, srv store.MCPServer) error 
 		return fmt.Errorf("list cached functions for %s: %w", srv.Name, err)
 	}
 
-	conn := NewConn(srv.Name, srv.URL, srv.AuthToken)
+	conn := m.newConn(srv)
 	state := &serverState{workspaceID: srv.WorkspaceID, serverName: srv.Name, conn: conn}
 	for _, f := range funcs {
 		if !f.Enabled {
@@ -104,7 +106,7 @@ func (m *Manager) LoadFromCache(ctx context.Context, srv store.MCPServer) error 
 // cached function rows. After the DB is updated, the in-memory registry is
 // rebuilt from cache so the toggle state stays consistent.
 func (m *Manager) Sync(ctx context.Context, srv store.MCPServer) error {
-	conn := NewConn(srv.Name, srv.URL, srv.AuthToken)
+	conn := m.newConn(srv)
 	defer func() {
 		_ = conn.Close()
 	}()
@@ -193,6 +195,41 @@ func (m *Manager) tryRegister(ctx context.Context, workspaceID, serverName strin
 	}
 	m.toolsR.RegisterForWorkspace(workspaceID, rt)
 	return true
+}
+
+func (m *Manager) newConn(srv store.MCPServer) *Conn {
+	if srv.EffectiveAuthType() == store.MCPAuthOAuth {
+		return NewConn(srv.Name, srv.URL, "", WithTokenProvider(m.oauthTokenProvider(srv.WorkspaceID, srv.Name, http.DefaultClient)))
+	}
+	return NewConn(srv.Name, srv.URL, srv.AuthToken)
+}
+
+func (m *Manager) oauthTokenProvider(workspaceID, serverName string, client *http.Client) tokenProvider {
+	return func(ctx context.Context) (string, error) {
+		if m == nil || m.store == nil {
+			return "", fmt.Errorf("mcp OAuth store is not configured")
+		}
+		srv, err := m.store.Get(ctx, workspaceID, serverName)
+		if err != nil {
+			return "", err
+		}
+		if srv.EffectiveAuthType() != store.MCPAuthOAuth {
+			return srv.AuthToken, nil
+		}
+		updated, refreshed, err := RefreshOAuth(ctx, *srv, client, time.Now())
+		if err != nil {
+			return "", err
+		}
+		if updated.OAuthConfig == nil || updated.OAuthConfig.AccessToken == "" {
+			return "", fmt.Errorf("OAuth authentication required for MCP server %s", serverName)
+		}
+		if refreshed {
+			if err := m.store.Update(ctx, updated); err != nil {
+				return "", err
+			}
+		}
+		return updated.OAuthConfig.AccessToken, nil
+	}
 }
 
 // Remove disconnects from a server and unregisters its tools.

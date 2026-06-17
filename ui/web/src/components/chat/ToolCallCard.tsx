@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Wrench, Loader2, Check, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Wrench, Check, X } from "lucide-react";
 import type { ToolCall } from "@/stores/chat";
 import { cn } from "@/lib/utils";
+import PhysicsGridSpinner from "@/components/ui/PhysicsGridSpinner";
 
 interface ToolCallCardProps {
   toolCall: ToolCall;
@@ -11,7 +12,7 @@ export default function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const statusIcon = {
-    running: <Loader2 className="size-3.5 animate-spin text-primary/60" />,
+    running: <PhysicsGridSpinner profile="execute-tool" size={14} className="mr-0.5" />,
     completed: <Check className="size-3.5 text-primary/60" />,
     failed: <X className="size-3.5 text-destructive/60" />,
   }[toolCall.status];

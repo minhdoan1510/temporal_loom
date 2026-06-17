@@ -87,12 +87,13 @@ func (h *RBACHandler) Me(w http.ResponseWriter, r *http.Request) {
 func (h *RBACHandler) Resources(w http.ResponseWriter, r *http.Request) {
 	resources := []string{
 		"tab:sessions:read", "tab:sessions:create", "tab:sessions:delete",
-		"tab:skills:read", "tab:skills:create", "tab:skills:update", "tab:skills:delete",
+		"tab:skills:read", "tab:skills:update", "tab:skills:delete",
 		"tab:context-files:read", "tab:context-files:create", "tab:context-files:update", "tab:context-files:delete",
 		"tab:knowledge:read", "tab:knowledge:create", "tab:knowledge:update", "tab:knowledge:delete",
 		"tab:roles:read", "tab:roles:create", "tab:roles:update", "tab:roles:delete",
 		"tab:mcp:read", "tab:mcp:create", "tab:mcp:update", "tab:mcp:delete",
 		"tab:workspace:read", "tab:workspace:update",
+		"tab:routines:read", "tab:routines:create", "tab:routines:update", "tab:routines:delete", "tab:routines:run",
 	}
 	for _, t := range h.toolsReg.AllForWorkspace(httputil.WorkspaceFromContext(r.Context())) {
 		resources = append(resources, tools.PermissionKeyOf(t))

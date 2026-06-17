@@ -101,7 +101,7 @@ func runChat(message, sessionKey string) error {
 	})
 
 	// Empty workspace → EnsureSession/Run default to the default workspace.
-	loop.EnsureSession("", sessionKey, "cli")
+	loop.EnsureSession("", sessionKey, "cli", "user")
 
 	if message != "" {
 		return runOneShot(ctx, loop, sessionKey, message)

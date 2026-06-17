@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/skills"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/store"
 )
 
@@ -193,86 +192,4 @@ func (s *MySQLSkillStore) ReplaceFiles(ctx context.Context, workspaceID, skillID
 		}
 	}
 	return tx.Commit()
-}
-
-// BackfillFrontmatter ensures every existing skill's content begins with a
-// valid frontmatter block. Skills predating the Claude-standard model store
-// their name/description only in columns and may use underscores in the name.
-// For each such skill it hyphenates the name, builds a frontmatter block from
-// the existing columns, prepends it to the content and updates the name column.
-// Idempotent: skills that already have frontmatter are skipped.
-func (s *MySQLSkillStore) BackfillFrontmatter(ctx context.Context) (int, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT workspace_id, id, name, description, content FROM skills`)
-	if err != nil {
-		return 0, fmt.Errorf("backfill: list skills: %w", err)
-	}
-
-	type row struct{ ws, id, name, desc, content string }
-	var pending []row
-	for rows.Next() {
-		var r row
-		var desc sql.NullString
-		if err := rows.Scan(&r.ws, &r.id, &r.name, &desc, &r.content); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("backfill: scan: %w", err)
-		}
-		r.desc = desc.String
-		pending = append(pending, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	updated := 0
-	for _, r := range pending {
-		var newName, desc, newContent string
-
-		if fields, body, ok := skills.FrontmatterFields(r.content); ok {
-			// Already has frontmatter. Only re-canonicalize our own
-			// machine-generated minimal frontmatter (just name/description) to
-			// drop unnecessary quotes; leave richer user-authored frontmatter alone.
-			if !onlyNameDescription(fields) {
-				continue
-			}
-			newName = fields["name"]
-			desc = fields["description"]
-			if newName == "" || desc == "" {
-				continue
-			}
-			newContent = skills.BuildFrontmatter(newName, desc, body)
-		} else {
-			// No frontmatter — build it from the existing columns.
-			newName = skills.NormalizeSkillName(r.name)
-			desc = strings.TrimSpace(r.desc)
-			if desc == "" {
-				desc = newName
-			}
-			newContent = skills.BuildFrontmatter(newName, desc, r.content)
-		}
-
-		if newContent == r.content && newName == r.name && desc == r.desc {
-			continue // nothing changed
-		}
-		if _, err := s.db.ExecContext(ctx,
-			`UPDATE skills SET name = ?, description = ?, content = ?, updated_at = NOW()
-			 WHERE workspace_id = ? AND id = ?`,
-			newName, desc, newContent, r.ws, r.id); err != nil {
-			return updated, fmt.Errorf("backfill: update skill %q: %w", r.id, err)
-		}
-		updated++
-	}
-	return updated, nil
-}
-
-// onlyNameDescription reports whether the frontmatter contains no keys other
-// than name and description (i.e. it is our generated minimal frontmatter).
-func onlyNameDescription(fields map[string]string) bool {
-	for k := range fields {
-		if k != "name" && k != "description" {
-			return false
-		}
-	}
-	return true
 }

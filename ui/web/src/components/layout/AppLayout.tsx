@@ -1,26 +1,34 @@
 import { useState, useEffect } from "react";
-import { NavLink, Outlet, useSearchParams, useLocation, useNavigate } from "react-router";
+import {
+  NavLink,
+  Outlet,
+  useSearchParams,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import {
   MessageSquare,
   BrainCircuit,
   Menu,
   Settings,
   LayoutDashboard,
-  ListTodo,
   FolderClosed,
   Search,
   ChevronDown,
   Trash2,
   Loader2,
   Plus,
-  Sparkles,
-  FileText
+  Clock,
+  Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createChatSessionKey } from "@/lib/chat-session";
+import { getSessionDisplayTitle } from "@/lib/session-title";
 import { useAuthStore } from "@/stores/auth";
 import { useSessionsStore } from "@/stores/sessions";
 import { useWorkspacesStore } from "@/stores/workspaces";
 import { useThemeStore } from "@/stores/theme";
+import PhysicsGridSpinner from "@/components/ui/PhysicsGridSpinner";
 import { rbacApi } from "@/lib/api";
 import SettingsDialog from "@/components/settings/SettingsDialog";
 import {
@@ -60,10 +68,8 @@ const navGroups: NavGroup[] = [
     label: "Workspace",
     items: [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, tab: "*" },
-      { to: "/todo", label: "To Do", icon: ListTodo, tab: "*" },
-      { to: "/documents", label: "Documents", icon: FileText, tab: "*" },
-      { to: "/files", label: "Files", icon: FolderClosed, tab: "*" },
-      { to: "/ai-sdk", label: "AI SDK Playground", icon: Sparkles, tab: "*" },
+      { to: "/skills", label: "Skills", icon: Zap, tab: "skills" },
+      { to: "/routines", label: "Routines", icon: Clock, tab: "routines" },
     ],
   },
 ];
@@ -97,7 +103,10 @@ export default function AppLayout() {
     const startWidth = sidebarWidth;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const newWidth = Math.max(100, Math.min(480, startWidth + (moveEvent.clientX - startX)));
+      const newWidth = Math.max(
+        100,
+        Math.min(480, startWidth + (moveEvent.clientX - startX)),
+      );
       setSidebarWidth(newWidth);
       localStorage.setItem("sidebarWidth", newWidth.toString());
     };
@@ -130,6 +139,7 @@ export default function AppLayout() {
   const isSettingsOpen = !!settingsTab;
 
   const hasTabAccess = useAuthStore((s) => s.hasTabAccess);
+  const { loadingIndicator } = useThemeStore();
   // Subscribe to permissions so component re-renders when they change.
   useAuthStore((s) => s.permissions);
 
@@ -137,8 +147,6 @@ export default function AppLayout() {
   const { sessions, loading, loadSessions, deleteSession } = useSessionsStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [chatSearch, setChatSearch] = useState("");
-  const [customKeyOpen, setCustomKeyOpen] = useState(false);
-  const [customKey, setCustomKey] = useState("");
 
   // Workspaces store hooks
   const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
@@ -187,22 +195,12 @@ export default function AppLayout() {
     }
   };
 
-  const handleNewChatAuto = async () => {
-    const randomId = Math.floor(1000 + Math.random() * 9000);
-    const key = `chat-${randomId}`;
-    navigate(`/sessions/${encodeURIComponent(key)}`);
-    await loadSessions();
-    toast.success(`Chat started with key: ${key}`);
-  };
-
-  const handleCreateCustomSession = async () => {
-    const trimmed = customKey.trim();
-    if (!trimmed) return;
-    setCustomKeyOpen(false);
-    setCustomKey("");
-    navigate(`/sessions/${encodeURIComponent(trimmed)}`);
-    await loadSessions();
-    toast.success(`Chat started with key: ${trimmed}`);
+  const handleStartNewChat = () => {
+    const sessionKey = createChatSessionKey();
+    setMobileOpen(false);
+    navigate(`/sessions/${encodeURIComponent(sessionKey)}`, {
+      state: { focusChatInput: true },
+    });
   };
 
   const handleDeleteSession = async (key: string, e: React.MouseEvent) => {
@@ -214,7 +212,10 @@ export default function AppLayout() {
 
     // Redirect to dashboard if deleting the current active session
     const currentSessionPath = `/sessions/${encodeURIComponent(key)}`;
-    if (pathname === currentSessionPath || pathname === `/sessions/${key}`) {
+    if (
+      pathname === currentSessionPath ||
+      pathname === `/sessions/${key}`
+    ) {
       navigate("/dashboard");
     }
   };
@@ -246,7 +247,7 @@ export default function AppLayout() {
 
   const isVisible = (item: NavItem) =>
     item.tab === "*" ? true : hasTabAccess(item.tab);
-  
+
   const visibleGroups = navGroups
     .map((g) => ({ ...g, items: g.items.filter(isVisible) }))
     .filter((g) => g.items.length > 0);
@@ -261,7 +262,7 @@ export default function AppLayout() {
           "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
           isActive
             ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-            : "text-sidebar-foreground hover:bg-sidebar-accent/60"
+            : "text-sidebar-foreground hover:bg-sidebar-accent/60",
         )
       }
     >
@@ -277,11 +278,11 @@ export default function AppLayout() {
     useThemeStore.getState().setTheme(workspaceTheme);
   }, [workspaceTheme]);
 
-  // Sessions are already scoped to the active workspace server-side; filter
-  // only by the search box.
-  const filteredSessions = sessions.filter((s) =>
-    s.key.toLowerCase().includes(chatSearch.toLowerCase())
-  );
+  const normalizedChatSearch = chatSearch.toLowerCase();
+  const filteredSessions = sessions.filter((s) => {
+    const title = getSessionDisplayTitle(s).toLowerCase();
+    return title.includes(normalizedChatSearch) || s.key.toLowerCase().includes(normalizedChatSearch);
+  });
 
   return (
     <div className="flex h-dvh overflow-hidden bg-sidebar">
@@ -297,10 +298,10 @@ export default function AppLayout() {
       <aside
         style={{ width: isMobile ? undefined : `${sidebarWidth}px` }}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar pl-3 py-4 transition-transform duration-200 md:relative",
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar px-3 py-4 transition-transform duration-200 md:relative",
           "md:static md:translate-x-0",
           isMobile ? "w-64" : "",
-          mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
         {/* Workspace Selector */}
@@ -313,7 +314,9 @@ export default function AppLayout() {
               >
                 <div className="flex items-center gap-2 truncate">
                   <FolderClosed className="size-4 shrink-0 text-neutral-600" />
-                  <span className="truncate">{activeWorkspace?.name || "Select Workspace"}</span>
+                  <span className="truncate">
+                    {activeWorkspace?.name || "Select Workspace"}
+                  </span>
                 </div>
                 <ChevronDown className="size-4 shrink-0 text-neutral-500" />
               </button>
@@ -330,7 +333,8 @@ export default function AppLayout() {
                     onClick={() => switchWorkspace(ws.id)}
                     className={cn(
                       "flex items-center justify-between px-2 py-1.5 text-sm cursor-pointer rounded-md transition hover:bg-sidebar-accent/60",
-                      ws.id === activeWorkspaceId && "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
+                      ws.id === activeWorkspaceId &&
+                        "bg-sidebar-accent font-semibold text-sidebar-accent-foreground",
                     )}
                   >
                     <span className="truncate">{ws.name}</span>
@@ -353,10 +357,7 @@ export default function AppLayout() {
         <nav className="flex-1 flex flex-col min-h-0 w-full overflow-hidden">
           <div className="shrink-0">
             {visibleGroups.map((group, i) => (
-              <div
-                key={group.label}
-                className={cn(i > 0 && "mt-5")}
-              >
+              <div key={group.label} className={cn(i > 0 && "mt-5")}>
                 <p className="mb-1.5 px-3 text-xs font-medium text-muted-foreground">
                   {group.label}
                 </p>
@@ -376,25 +377,18 @@ export default function AppLayout() {
                   onClick={() => setSearchOpen(!searchOpen)}
                   className={cn(
                     "flex size-6 items-center justify-center rounded-md transition duration-150 cursor-pointer",
-                    searchOpen ? "bg-white/60 text-neutral-800" : "text-muted-foreground hover:bg-white/30 hover:text-foreground"
+                    searchOpen
+                      ? "bg-white/60 text-neutral-800"
+                      : "text-muted-foreground hover:bg-white/30 hover:text-foreground",
                   )}
                   title="Search chats"
                 >
                   <Search className="size-3.5" />
                 </button>
-                {/* Custom Chat */}
+                {/* New Chat */}
                 <button
                   type="button"
-                  onClick={() => setCustomKeyOpen(true)}
-                  className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-white/30 hover:text-foreground transition duration-150 cursor-pointer"
-                  title="New custom chat..."
-                >
-                  <ChevronDown className="size-3.5" />
-                </button>
-                {/* New Chat Auto */}
-                <button
-                  type="button"
-                  onClick={handleNewChatAuto}
+                  onClick={handleStartNewChat}
                   className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-white/30 hover:text-foreground transition duration-150 cursor-pointer"
                   title="New Chat"
                 >
@@ -402,7 +396,7 @@ export default function AppLayout() {
                 </button>
               </div>
             </div>
-            
+
             {/* Session list search input */}
             {searchOpen && (
               <div className="px-3 mb-2 shrink-0">
@@ -421,14 +415,24 @@ export default function AppLayout() {
             <div className="space-y-0.5 flex-1 overflow-y-auto min-h-0 w-full">
               {loading ? (
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-400">
-                  <Loader2 className="size-3 animate-spin" />
+                  <PhysicsGridSpinner
+                    profile={loadingIndicator}
+                    size={12}
+                    className="mr-0.5"
+                  />
                   <span>Loading chats...</span>
                 </div>
               ) : filteredSessions.length === 0 ? (
-                <p className="px-3 py-1.5 text-xs text-neutral-400 italic">No chats yet</p>
+                <p className="px-3 py-1.5 text-xs text-neutral-400 italic">
+                  No chats yet
+                </p>
               ) : (
                 filteredSessions.map((s) => {
-                  const isActive = pathname.startsWith(`/sessions/${encodeURIComponent(s.key)}`) || pathname === `/sessions/${s.key}`;
+                  const title = getSessionDisplayTitle(s);
+                  const isActive =
+                    pathname.startsWith(
+                      `/sessions/${encodeURIComponent(s.key)}`,
+                    ) || pathname === `/sessions/${s.key}`;
                   return (
                     <div
                       key={s.key}
@@ -439,14 +443,16 @@ export default function AppLayout() {
                         onClick={() => setMobileOpen(false)}
                         className={({ isActive: linkActive }) =>
                           cn(
-                            "flex min-h-10 w-full items-center gap-3 rounded-lg pl-3 pr-10 text-sm font-medium transition-colors duration-150",
-                            (isActive || linkActive)
+                            "flex min-h-8 w-full items-center gap-3 rounded-lg pl-3 pr-10 text-sm font-medium transition-colors duration-150",
+                            isActive || linkActive
                               ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
-                              : "text-sidebar-foreground hover:bg-sidebar-accent/60"
+                              : "text-sidebar-foreground hover:bg-sidebar-accent/60",
                           )
                         }
                       >
-                        <span className="truncate">{s.key}</span>
+                        <span className="truncate" title={`${title} (${s.key})`}>
+                          {title}
+                        </span>
                       </NavLink>
                       <button
                         type="button"
@@ -471,7 +477,8 @@ export default function AppLayout() {
             onClick={() => setSearchParams({ settings: "profile" })}
             className={cn(
               "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-sidebar-foreground transition-colors duration-150 hover:bg-sidebar-accent cursor-pointer",
-              isSettingsOpen && "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
+              isSettingsOpen &&
+                "bg-sidebar-accent text-sidebar-accent-foreground font-semibold",
             )}
           >
             <Settings className="size-4 shrink-0" />
@@ -485,7 +492,7 @@ export default function AppLayout() {
         />
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background shadow-[-1px_-1px_0_rgba(255,255,255,0.7)] m-4">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl bg-background m-4">
         {/* Mobile top bar */}
         <div className="flex h-12 items-center gap-2 border-b border-border bg-background px-3 md:hidden">
           <button
@@ -514,39 +521,6 @@ export default function AppLayout() {
         activeTab={settingsTab || "profile"}
         onTabChange={handleTabChange}
       />
-
-      {/* New Custom Session Key Dialog */}
-      <Dialog open={customKeyOpen} onOpenChange={setCustomKeyOpen}>
-        <DialogContent className="max-w-md border-border/50 bg-sidebar">
-          <DialogHeader>
-            <DialogTitle className="font-heading">New Session</DialogTitle>
-          </DialogHeader>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-muted-foreground">
-              Session Key
-            </label>
-            <Input
-              value={customKey}
-              onChange={(e) => setCustomKey(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreateCustomSession()}
-              placeholder="e.g. ticket:LENDING-123"
-              className="bg-card font-mono text-sm"
-              autoFocus
-            />
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              A unique key to identify this session. The session will be created when you send the first message.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="cursor-pointer" onClick={() => setCustomKeyOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateCustomSession} disabled={!customKey.trim()} className="cursor-pointer">
-              Start Chat
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* New Workspace Dialog */}
       <Dialog

@@ -27,7 +27,7 @@ func NewMySQLMCPServerStore(db *sql.DB, encryptionKey string) *MySQLMCPServerSto
 	return &MySQLMCPServerStore{db: db, encryptionKey: encryptionKey}
 }
 
-const serverCols = `workspace_id, name, url, auth_token, enabled, description, last_synced, created_at, updated_at`
+const serverCols = `workspace_id, name, url, auth_token, auth_type, oauth_config, enabled, description, last_synced, created_at, updated_at`
 
 func (s *MySQLMCPServerStore) List(ctx context.Context, workspaceID string) ([]store.MCPServer, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -44,6 +44,7 @@ func (s *MySQLMCPServerStore) List(ctx context.Context, workspaceID string) ([]s
 			return nil, err
 		}
 		srv.AuthToken = s.decryptToken(ctx, srv.Name, srv.AuthToken)
+		srv.OAuthConfig = s.decryptOAuthConfig(ctx, srv.Name, srv.OAuthConfig)
 		servers = append(servers, srv)
 	}
 	return servers, rows.Err()
@@ -64,6 +65,7 @@ func (s *MySQLMCPServerStore) ListAllServers(ctx context.Context) ([]store.MCPSe
 			return nil, err
 		}
 		srv.AuthToken = s.decryptToken(ctx, srv.Name, srv.AuthToken)
+		srv.OAuthConfig = s.decryptOAuthConfig(ctx, srv.Name, srv.OAuthConfig)
 		servers = append(servers, srv)
 	}
 	return servers, rows.Err()
@@ -80,6 +82,7 @@ func (s *MySQLMCPServerStore) Get(ctx context.Context, workspaceID, name string)
 		return nil, fmt.Errorf("get mcp server %q: %w", name, err)
 	}
 	srv.AuthToken = s.decryptToken(ctx, srv.Name, srv.AuthToken)
+	srv.OAuthConfig = s.decryptOAuthConfig(ctx, srv.Name, srv.OAuthConfig)
 	return &srv, nil
 }
 
@@ -88,10 +91,18 @@ func (s *MySQLMCPServerStore) Create(ctx context.Context, srv store.MCPServer) e
 	if err != nil {
 		return fmt.Errorf("encrypt auth_token: %w", err)
 	}
+	oauthConfig, err := s.marshalOAuthConfig(srv.OAuthConfig)
+	if err != nil {
+		return fmt.Errorf("marshal oauth_config: %w", err)
+	}
+	authType := srv.AuthType
+	if authType == "" {
+		authType = store.MCPAuthBearer
+	}
 	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO mcp_servers (workspace_id, name, url, auth_token, enabled, description)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		srv.WorkspaceID, srv.Name, srv.URL, token, srv.Enabled, srv.Description,
+		`INSERT INTO mcp_servers (workspace_id, name, url, auth_token, auth_type, oauth_config, enabled, description)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		srv.WorkspaceID, srv.Name, srv.URL, token, authType, oauthConfig, srv.Enabled, srv.Description,
 	); err != nil {
 		return fmt.Errorf("create mcp server: %w", err)
 	}
@@ -103,10 +114,18 @@ func (s *MySQLMCPServerStore) Update(ctx context.Context, srv store.MCPServer) e
 	if err != nil {
 		return fmt.Errorf("encrypt auth_token: %w", err)
 	}
+	oauthConfig, err := s.marshalOAuthConfig(srv.OAuthConfig)
+	if err != nil {
+		return fmt.Errorf("marshal oauth_config: %w", err)
+	}
+	authType := srv.AuthType
+	if authType == "" {
+		authType = store.MCPAuthBearer
+	}
 	if _, err := s.db.ExecContext(ctx,
-		`UPDATE mcp_servers SET url = ?, auth_token = ?, enabled = ?, description = ?
+		`UPDATE mcp_servers SET url = ?, auth_token = ?, auth_type = ?, oauth_config = ?, enabled = ?, description = ?
 		 WHERE workspace_id = ? AND name = ?`,
-		srv.URL, token, srv.Enabled, srv.Description, srv.WorkspaceID, srv.Name,
+		srv.URL, token, authType, oauthConfig, srv.Enabled, srv.Description, srv.WorkspaceID, srv.Name,
 	); err != nil {
 		return fmt.Errorf("update mcp server: %w", err)
 	}
@@ -131,6 +150,63 @@ func (s *MySQLMCPServerStore) decryptToken(ctx context.Context, name, stored str
 		return stored
 	}
 	return plain
+}
+
+func (s *MySQLMCPServerStore) marshalOAuthConfig(cfg *store.MCPOAuthConfig) (any, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	encrypted, err := s.encryptOAuthConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(encrypted)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+func (s *MySQLMCPServerStore) encryptOAuthConfig(cfg *store.MCPOAuthConfig) (*store.MCPOAuthConfig, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	encrypted := *cfg
+	var err error
+	if encrypted.ClientSecret, err = s.encryptToken(encrypted.ClientSecret); err != nil {
+		return nil, err
+	}
+	if encrypted.AccessToken, err = s.encryptToken(encrypted.AccessToken); err != nil {
+		return nil, err
+	}
+	if encrypted.RefreshToken, err = s.encryptToken(encrypted.RefreshToken); err != nil {
+		return nil, err
+	}
+	if encrypted.CodeVerifier, err = s.encryptToken(encrypted.CodeVerifier); err != nil {
+		return nil, err
+	}
+	return &encrypted, nil
+}
+
+func (s *MySQLMCPServerStore) decryptOAuthConfig(ctx context.Context, name string, cfg *store.MCPOAuthConfig) *store.MCPOAuthConfig {
+	if cfg == nil {
+		return nil
+	}
+	decrypted := *cfg
+	var err error
+	if decrypted.ClientSecret, err = crypto.Decrypt(decrypted.ClientSecret, s.encryptionKey); err != nil {
+		slog.WarnContext(ctx, "mcp_servers.oauth_config decrypt client_secret failed", "server", name, "error", err)
+	}
+	if decrypted.AccessToken, err = crypto.Decrypt(decrypted.AccessToken, s.encryptionKey); err != nil {
+		slog.WarnContext(ctx, "mcp_servers.oauth_config decrypt access_token failed", "server", name, "error", err)
+	}
+	if decrypted.RefreshToken, err = crypto.Decrypt(decrypted.RefreshToken, s.encryptionKey); err != nil {
+		slog.WarnContext(ctx, "mcp_servers.oauth_config decrypt refresh_token failed", "server", name, "error", err)
+	}
+	if decrypted.CodeVerifier, err = crypto.Decrypt(decrypted.CodeVerifier, s.encryptionKey); err != nil {
+		slog.WarnContext(ctx, "mcp_servers.oauth_config decrypt code_verifier failed", "server", name, "error", err)
+	}
+	return &decrypted
 }
 
 func (s *MySQLMCPServerStore) Delete(ctx context.Context, workspaceID, name string) error {
@@ -286,9 +362,20 @@ type rowScanner interface {
 func scanServer(r rowScanner) (store.MCPServer, error) {
 	var srv store.MCPServer
 	var lastSynced sql.NullTime
-	if err := r.Scan(&srv.WorkspaceID, &srv.Name, &srv.URL, &srv.AuthToken, &srv.Enabled, &srv.Description,
+	var oauthConfig sql.NullString
+	if err := r.Scan(&srv.WorkspaceID, &srv.Name, &srv.URL, &srv.AuthToken, &srv.AuthType, &oauthConfig, &srv.Enabled, &srv.Description,
 		&lastSynced, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
 		return srv, err
+	}
+	if srv.AuthType == "" {
+		srv.AuthType = store.MCPAuthBearer
+	}
+	if oauthConfig.Valid && strings.TrimSpace(oauthConfig.String) != "" {
+		var cfg store.MCPOAuthConfig
+		if err := json.Unmarshal([]byte(oauthConfig.String), &cfg); err != nil {
+			return srv, fmt.Errorf("decode oauth_config for %s: %w", srv.Name, err)
+		}
+		srv.OAuthConfig = &cfg
 	}
 	if lastSynced.Valid {
 		srv.LastSynced = &lastSynced.Time

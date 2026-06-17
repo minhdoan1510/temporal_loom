@@ -38,6 +38,7 @@ type RunRequest struct {
 // RunResult is the output of a completed agent run.
 type RunResult struct {
 	Content    string           `json:"content"`
+	Title      string           `json:"title,omitempty"`
 	RunID      string           `json:"runId"`
 	Iterations int              `json:"iterations"`
 	Usage      *providers.Usage `json:"usage,omitempty"`

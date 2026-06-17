@@ -114,7 +114,12 @@ func BuildFrontmatter(name, description, body string) string {
 		b.WriteString(desc)
 	}
 	b.WriteString("\n---\n\n")
-	b.WriteString(body)
+	// Trim leading newlines so the result is stable under repeated parse/build
+	// round-trips: ParseFrontmatter leaves the blank separator line on the body,
+	// and we always re-emit our own "\n\n" separator above. Without this, every
+	// round-trip (e.g. the startup frontmatter backfill) would prepend another
+	// blank line and rewrite the skill on every app start.
+	b.WriteString(strings.TrimLeft(body, "\n"))
 	return b.String()
 }
 

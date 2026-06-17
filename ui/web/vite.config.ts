@@ -20,6 +20,11 @@ export default defineConfig(({ mode }) => {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
+      // Force a single React instance. Under pnpm, a dependency that lists react
+      // as a peer (e.g. "agentation") can otherwise resolve its own copy, which
+      // makes hooks run against a different React and throws "Invalid hook call /
+      // Cannot read properties of null (reading 'useCallback')".
+      dedupe: ["react", "react-dom"],
     },
     server: {
       port: 5173,
@@ -48,6 +53,14 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, "index.html"),
+          jsonRenderElements: path.resolve(__dirname, "json-render-elements.html"),
+          onboarding: path.resolve(__dirname, "onboarding.html"),
+        },
+      },
+    },
   };
 });
-

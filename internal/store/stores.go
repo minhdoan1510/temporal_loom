@@ -9,4 +9,7 @@ type Stores struct {
 	Memory       MemoryStore
 	Knowledge    KnowledgeStore
 	MCPServers   MCPServerStore
+	Routines     RoutineStore
+	RoutineRuns  RoutineRunStore
+	Agents       AgentStore
 }

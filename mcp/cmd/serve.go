@@ -15,8 +15,10 @@ import (
 
 	"gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/config"
 	"gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/logger"
+	dwserver "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/servers/datawarehouse"
 	jiraserver "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/servers/jira"
 	loanserver "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/servers/loan"
+	mailserver "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/servers/mail"
 	opensearchserver "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/servers/opensearch"
 	"gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/telemetry"
 )
@@ -58,6 +60,8 @@ func Execute() {
 
 	mountMCP(mux, "/mcp/jira", jiraserver.New(cfg.Jira))
 	mountMCP(mux, "/mcp/opensearch", opensearchserver.New(cfg.OpenSearch))
+	mountMCP(mux, "/mcp/mail", mailserver.New(cfg.Mail))
+	mountMCP(mux, "/mcp/datawarehouse", dwserver.New(cfg.LLM, cfg.Datawarehouse))
 
 	loanSrv, loanCleanup, err := loanserver.New(cfg.Onboarding)
 	if err != nil {

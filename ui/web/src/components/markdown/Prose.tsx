@@ -1,11 +1,19 @@
 import { useState, useCallback } from "react";
+import { ComarkClient } from "@comark/react";
+import jsonRender from "@comark/react/plugins/json-render";
 import { Copy, Check } from "lucide-react";
+import ReportRenderer, { reportComponents } from "@/components/chat/ReportRenderer";
+import { normalizeReportSpecForComark, parseReportSpec } from "@/lib/report-spec";
 
 interface ProseProps {
   content: string;
+  linkClassName?: string;
 }
 
-export default function Prose({ content }: ProseProps) {
+const defaultLinkClassName = "text-primary underline underline-offset-2 hover:text-primary/80";
+const jsonRenderPlugins = [jsonRender()];
+
+export default function Prose({ content, linkClassName = defaultLinkClassName }: ProseProps) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   const handleCopy = useCallback((code: string, idx: number) => {
@@ -17,14 +25,14 @@ export default function Prose({ content }: ProseProps) {
   if (!content) return null;
 
   // Split on fenced code blocks: captures [before, lang, code, between, lang, code, ...]
-  const blocks = content.split(/```(\w*)\n?([\s\S]*?)```/g);
+  const blocks = content.split(/```([^\n`]*)\n?([\s\S]*?)```/g);
   const elements: React.ReactNode[] = [];
   let codeBlockIdx = 0;
 
   for (let i = 0; i < blocks.length; i++) {
     if (i % 3 === 0) {
       // Text block — parse block-level markdown
-      const parsed = parseBlocks(blocks[i]);
+      const parsed = parseBlocks(blocks[i], linkClassName);
       if (parsed.length > 0) {
         elements.push(<span key={i}>{parsed}</span>);
       }
@@ -36,6 +44,11 @@ export default function Prose({ content }: ProseProps) {
       const code = blocks[i];
       const idx = codeBlockIdx++;
       const isCopied = copiedIdx === idx;
+      const renderFence = renderJsonRenderFence(lang, code, i);
+      if (renderFence) {
+        elements.push(renderFence);
+        continue;
+      }
 
       elements.push(
         <div key={i} className="group relative my-3 min-w-0">
@@ -61,22 +74,53 @@ export default function Prose({ content }: ProseProps) {
   return <div className="min-w-0 space-y-1 break-words leading-relaxed">{elements}</div>;
 }
 
+function renderJsonRenderFence(lang: string, code: string, key: number) {
+  const labels = lang
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const isJsonRender = labels.includes("json-render");
+  const isSpec = labels.includes("spec");
+  const isYamlRender = labels.includes("yaml-render");
+  if (!isJsonRender && !isYamlRender && !isSpec) return null;
+
+  if (isJsonRender || isSpec) {
+    const spec = parseReportSpec(code);
+    if (!spec) return null;
+    return <ReportRenderer key={key} spec={spec} />;
+  }
+
+  const normalizedCode = normalizeReportSpecForComark(code) ?? code.trim();
+  if (!normalizedCode) return null;
+
+  return (
+    <ComarkClient
+      key={key}
+      className="min-w-0 text-foreground"
+      components={reportComponents}
+      markdown={`\`\`\`${isJsonRender ? "json-render" : "yaml-render"}\n${normalizedCode}\n\`\`\``}
+      plugins={jsonRenderPlugins}
+      streaming
+    />
+  );
+}
+
 // ─── Block-level parsing ──────────────────────────────────────────────
 
-function parseBlocks(text: string): React.ReactNode[] {
+function parseBlocks(text: string, linkClassName: string): React.ReactNode[] {
   if (!text) return [];
 
   const lines = text.split("\n");
   const nodes: React.ReactNode[] = [];
   let i = 0;
-  let key = 0;
 
   while (i < lines.length) {
     const line = lines[i];
 
     // Horizontal rule
     if (/^(\s*[-*_]\s*){3,}$/.test(line)) {
-      nodes.push(<hr key={key++} className="my-4 border-border/40" />);
+      nodes.push(<hr key={`hr-${i}`} className="my-4 border-border/40" />);
       i++;
       continue;
     }
@@ -86,7 +130,7 @@ function parseBlocks(text: string): React.ReactNode[] {
     if (headingMatch) {
       const level = headingMatch[1].length;
       const text = headingMatch[2];
-      nodes.push(renderHeading(level, text, key++));
+      nodes.push(renderHeading(level, text, `heading-${i}`, linkClassName));
       i++;
       continue;
     }
@@ -103,7 +147,7 @@ function parseBlocks(text: string): React.ReactNode[] {
         tableLines.push(lines[j]);
         j++;
       }
-      nodes.push(renderTable(tableLines, key++));
+      nodes.push(renderTable(tableLines, `table-${i}`, linkClassName));
       i = j;
       continue;
     }
@@ -116,7 +160,7 @@ function parseBlocks(text: string): React.ReactNode[] {
         listLines.push(lines[j]);
         j++;
       }
-      nodes.push(renderUnorderedList(listLines, key++));
+      nodes.push(renderUnorderedList(listLines, `ul-${i}`, linkClassName));
       i = j;
       continue;
     }
@@ -132,7 +176,7 @@ function parseBlocks(text: string): React.ReactNode[] {
         listLines.push(lines[j]);
         j++;
       }
-      nodes.push(renderOrderedList(listLines, key++));
+      nodes.push(renderOrderedList(listLines, `ol-${i}`, linkClassName));
       i = j;
       continue;
     }
@@ -160,11 +204,11 @@ function parseBlocks(text: string): React.ReactNode[] {
     }
     if (paraLines.length > 0) {
       nodes.push(
-        <p key={key++} className="my-1.5">
+        <p key={`p-${i}`} className="my-1.5">
           {paraLines.map((l, li) => (
             <span key={li}>
               {li > 0 && <br />}
-              {renderInline(l)}
+              {renderInline(l, linkClassName)}
             </span>
           ))}
         </p>
@@ -178,7 +222,7 @@ function parseBlocks(text: string): React.ReactNode[] {
 
 // ─── Headings ─────────────────────────────────────────────────────────
 
-function renderHeading(level: number, text: string, key: number): React.ReactNode {
+function renderHeading(level: number, text: string, key: string | number, linkClassName: string): React.ReactNode {
   const styles: Record<number, string> = {
     1: "text-xl font-bold mt-5 mb-2 font-heading text-foreground",
     2: "text-lg font-bold mt-4 mb-2 font-heading text-foreground",
@@ -189,29 +233,29 @@ function renderHeading(level: number, text: string, key: number): React.ReactNod
   };
   const className = styles[level];
   switch (level) {
-    case 1: return <h1 key={key} className={className}>{renderInline(text)}</h1>;
-    case 2: return <h2 key={key} className={className}>{renderInline(text)}</h2>;
-    case 3: return <h3 key={key} className={className}>{renderInline(text)}</h3>;
-    case 4: return <h4 key={key} className={className}>{renderInline(text)}</h4>;
-    case 5: return <h5 key={key} className={className}>{renderInline(text)}</h5>;
-    case 6: return <h6 key={key} className={className}>{renderInline(text)}</h6>;
-    default: return <p key={key} className={className}>{renderInline(text)}</p>;
+    case 1: return <h1 key={key} className={className}>{renderInline(text, linkClassName)}</h1>;
+    case 2: return <h2 key={key} className={className}>{renderInline(text, linkClassName)}</h2>;
+    case 3: return <h3 key={key} className={className}>{renderInline(text, linkClassName)}</h3>;
+    case 4: return <h4 key={key} className={className}>{renderInline(text, linkClassName)}</h4>;
+    case 5: return <h5 key={key} className={className}>{renderInline(text, linkClassName)}</h5>;
+    case 6: return <h6 key={key} className={className}>{renderInline(text, linkClassName)}</h6>;
+    default: return <p key={key} className={className}>{renderInline(text, linkClassName)}</p>;
   }
 }
 
 // ─── Lists ────────────────────────────────────────────────────────────
 
-function renderUnorderedList(lines: string[], key: number): React.ReactNode {
+function renderUnorderedList(lines: string[], key: string | number, linkClassName: string): React.ReactNode {
   const items = parseListItems(lines, /^\s*[-*+]\s+/);
   return (
     <ul key={key} className="my-2 list-disc space-y-1 pl-6 marker:text-muted-foreground/50">
       {items.map((item, i) => (
         <li key={i}>
-          {renderInline(item.text)}
+          {renderInline(item.text, linkClassName)}
           {item.children.length > 0 && (
             <ul className="mt-1 list-disc space-y-1 pl-5 marker:text-muted-foreground/40">
               {item.children.map((child, ci) => (
-                <li key={ci}>{renderInline(child)}</li>
+                <li key={ci}>{renderInline(child, linkClassName)}</li>
               ))}
             </ul>
           )}
@@ -221,17 +265,17 @@ function renderUnorderedList(lines: string[], key: number): React.ReactNode {
   );
 }
 
-function renderOrderedList(lines: string[], key: number): React.ReactNode {
+function renderOrderedList(lines: string[], key: string | number, linkClassName: string): React.ReactNode {
   const items = parseListItems(lines, /^\s*\d+[.)]\s+/);
   return (
     <ol key={key} className="my-2 list-decimal space-y-1 pl-6 marker:text-muted-foreground/50">
       {items.map((item, i) => (
         <li key={i}>
-          {renderInline(item.text)}
+          {renderInline(item.text, linkClassName)}
           {item.children.length > 0 && (
             <ol className="mt-1 list-decimal space-y-1 pl-5 marker:text-muted-foreground/40">
               {item.children.map((child, ci) => (
-                <li key={ci}>{renderInline(child)}</li>
+                <li key={ci}>{renderInline(child, linkClassName)}</li>
               ))}
             </ol>
           )}
@@ -267,7 +311,7 @@ function parseListItems(lines: string[], marker: RegExp): ListItem[] {
 
 // ─── Tables ───────────────────────────────────────────────────────────
 
-function renderTable(lines: string[], key: number): React.ReactNode {
+function renderTable(lines: string[], key: string | number, linkClassName: string): React.ReactNode {
   const parseRow = (line: string) =>
     line
       .replace(/^\|/, "")
@@ -291,7 +335,7 @@ function renderTable(lines: string[], key: number): React.ReactNode {
                 key={i}
                 className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground"
               >
-                {renderInline(h)}
+                {renderInline(h, linkClassName)}
               </th>
             ))}
           </tr>
@@ -301,7 +345,7 @@ function renderTable(lines: string[], key: number): React.ReactNode {
             <tr key={ri} className="border-b border-border/20 last:border-0">
               {row.map((cell, ci) => (
                 <td key={ci} className="px-3 py-2 text-muted-foreground">
-                  {renderInline(cell)}
+                  {renderInline(cell, linkClassName)}
                 </td>
               ))}
             </tr>
@@ -316,17 +360,17 @@ function renderTable(lines: string[], key: number): React.ReactNode {
 
 const URL_RE = /(https?:\/\/[^\s)<>]+)/g;
 
-function linkifyText(text: string, keyPrefix: string): React.ReactNode {
+function linkifyText(text: string, keyPrefix: string, linkClassName: string): React.ReactNode {
   const parts = text.split(URL_RE);
   if (parts.length === 1) return text;
   return parts.map((part, i) =>
-    URL_RE.test(part) ? (
+    part.startsWith("http://") || part.startsWith("https://") ? (
       <a
         key={`${keyPrefix}-${i}`}
         href={part}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-primary underline underline-offset-2 hover:text-primary/80"
+        className={linkClassName}
       >
         {part}
       </a>
@@ -336,7 +380,7 @@ function linkifyText(text: string, keyPrefix: string): React.ReactNode {
   );
 }
 
-function renderInline(text: string): React.ReactNode {
+function renderInline(text: string, linkClassName: string): React.ReactNode {
   // Split on inline patterns: bold, italic, strikethrough, inline code
   const parts = text.split(/(`[^`]+`|\*\*\*[^*]+\*\*\*|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g);
   return parts.map((part, i) => {
@@ -384,6 +428,6 @@ function renderInline(text: string): React.ReactNode {
       );
     }
     // Plain text with URL detection
-    return <span key={i}>{linkifyText(part, `l${i}`)}</span>;
+    return <span key={i}>{linkifyText(part, `l${i}`, linkClassName)}</span>;
   });
 }

@@ -14,6 +14,7 @@ import (
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/config"
 	mcpmgr "gitlab.zalopay.vn/fin/lending/lending-claw/internal/mcp"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/services/cas"
+	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/services/routines"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/skills"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/store"
 	"gitlab.zalopay.vn/fin/lending/lending-claw/internal/tools"
@@ -37,6 +38,7 @@ type RouterDeps struct {
 	MCPManager     *mcpmgr.Manager
 	Config         *config.Config // needed for knowledge sync
 	SkillsCache    *skills.Cache  // optional: invalidated after skill mutations so the agent loop sees changes immediately
+	Routines       *routines.Service
 }
 
 // NewRouter creates an http.Handler with all API routes registered.
@@ -67,19 +69,25 @@ func NewRouter(deps RouterDeps) http.Handler {
 	agentH := handler2.NewAgentHandler(deps.Loop)
 	mux.HandleFunc("POST "+wsPrefix+"/agent/run", middleware2.RequirePermission("tab:sessions:create", agentH.Run))
 
+	// OpenAI-compatible raw completions (no tools/system agent loop).
+	completionsH := handler2.NewCompletionsHandler(deps.Loop)
+	mux.HandleFunc("POST "+wsPrefix+"/chat/completions", completionsH.ChatCompletions)
+
 	// Sessions
 	sessH := handler2.NewSessionsHandler(deps.Stores.Sessions)
 	mux.HandleFunc("GET "+wsPrefix+"/sessions", middleware2.RequirePermission("tab:sessions:read", sessH.List))
 	mux.HandleFunc("GET "+wsPrefix+"/sessions/{key}", middleware2.RequirePermission("tab:sessions:read", sessH.Get))
+	mux.HandleFunc("PUT "+wsPrefix+"/sessions/{key}", sessH.Update)
 	mux.HandleFunc("DELETE "+wsPrefix+"/sessions/{key}", middleware2.RequirePermission("tab:sessions:delete", sessH.Delete))
 
 	// Skills
-	skillsH := handler2.NewSkillsHandler(deps.Stores.Skills, deps.SkillsCache)
+	skillsH := handler2.NewSkillsHandler(deps.Stores.Skills, deps.SkillsCache, deps.Loop)
 	mux.HandleFunc("GET "+wsPrefix+"/skills", middleware2.RequirePermission("tab:skills:read", skillsH.List))
-	mux.HandleFunc("POST "+wsPrefix+"/skills", middleware2.RequirePermission("tab:skills:create", skillsH.Create))
+	mux.HandleFunc("POST "+wsPrefix+"/skills", skillsH.Create)
 	mux.HandleFunc("GET "+wsPrefix+"/skills/{id}", middleware2.RequirePermission("tab:skills:read", skillsH.Get))
 	mux.HandleFunc("PUT "+wsPrefix+"/skills/{id}", middleware2.RequirePermission("tab:skills:update", skillsH.Update))
 	mux.HandleFunc("DELETE "+wsPrefix+"/skills/{id}", middleware2.RequirePermission("tab:skills:delete", skillsH.Delete))
+	mux.HandleFunc("POST "+wsPrefix+"/skills/generate", skillsH.Generate)
 
 	// Context Files
 	cfH := handler2.NewContextFilesHandler(deps.Stores.ContextFiles)
@@ -118,6 +126,20 @@ func NewRouter(deps RouterDeps) http.Handler {
 		mux.HandleFunc("POST "+wsPrefix+"/mcp/servers/{name}/refresh", middleware2.RequirePermission("tab:mcp:update", mcpH.Refresh))
 		mux.HandleFunc("PATCH "+wsPrefix+"/mcp/servers/{name}/functions/{func}", middleware2.RequirePermission("tab:mcp:update", mcpH.SetFunctionEnabled))
 		mux.HandleFunc("DELETE "+wsPrefix+"/mcp/servers/{name}", middleware2.RequirePermission("tab:mcp:delete", mcpH.Delete))
+	}
+
+	// Routines (per workspace)
+	if deps.Routines != nil {
+		routinesH := handler2.NewRoutinesHandler(deps.Routines)
+		mux.HandleFunc("GET "+wsPrefix+"/routines", middleware2.RequirePermission("tab:routines:read", routinesH.List))
+		mux.HandleFunc("POST "+wsPrefix+"/routines", middleware2.RequirePermission("tab:routines:create", routinesH.Create))
+		mux.HandleFunc("GET "+wsPrefix+"/routines/{id}", middleware2.RequirePermission("tab:routines:read", routinesH.Get))
+		mux.HandleFunc("PUT "+wsPrefix+"/routines/{id}", middleware2.RequirePermission("tab:routines:update", routinesH.Update))
+		mux.HandleFunc("DELETE "+wsPrefix+"/routines/{id}", middleware2.RequirePermission("tab:routines:delete", routinesH.Delete))
+		mux.HandleFunc("GET "+wsPrefix+"/routines/{id}/runs", middleware2.RequirePermission("tab:routines:read", routinesH.ListRuns))
+		mux.HandleFunc("POST "+wsPrefix+"/routines/{id}/fire", routinesH.Fire)
+		mux.HandleFunc("POST "+wsPrefix+"/routines/{id}/rotate-token", middleware2.RequirePermission("tab:routines:update", routinesH.RotateToken))
+		mux.HandleFunc("DELETE "+wsPrefix+"/routines/{id}/revoke-token", middleware2.RequirePermission("tab:routines:delete", routinesH.RevokeToken))
 	}
 
 	// Auth (public — skipped by AuthMiddleware)

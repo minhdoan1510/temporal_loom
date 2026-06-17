@@ -34,7 +34,7 @@ func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, s
 	// Build system prompt
 	systemPrompt := BuildSystemPrompt(SystemPromptConfig{
 		Channel:        channel,
-		ToolDescs:      l.tools.Descriptions(),
+		ToolDescs:      l.tools.Descriptions(ctx),
 		SkillsSummary:  skillsSummary,
 		HasMemory:      l.hasMemory,
 		HasSkillSearch: hasSkillSearch,

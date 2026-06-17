@@ -19,6 +19,7 @@ type Config struct {
 	Translator TranslatorConfig `yaml:"translator"`
 	Telemetry  TelemetryConfig  `yaml:"telemetry"`
 	RBAC       RBACConfig       `yaml:"rbac"`
+	Temporal   TemporalConfig   `yaml:"temporal"`
 	CAS        CASConfig        `yaml:"cas"`
 }
 
@@ -128,6 +129,12 @@ type LangfuseConfig struct {
 	Endpoint  string `yaml:"endpoint"`   // full traces URL, e.g. "http://langfuse:3000/api/public/otel/v1/traces"
 	PublicKey string `yaml:"public_key"` // pk-lf-...
 	SecretKey string `yaml:"secret_key"` // sk-lf-...
+}
+
+type TemporalConfig struct {
+	HostPort  string `yaml:"host_port"`
+	Namespace string `yaml:"namespace"`
+	TLS       bool   `yaml:"tls"`
 }
 
 type RBACConfig struct {

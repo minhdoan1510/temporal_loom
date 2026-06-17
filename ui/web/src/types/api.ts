@@ -20,6 +20,7 @@ export interface WorkspaceMember {
 
 export interface SessionInfo {
   key: string;
+  title?: string;
   created_by?: string;
   message_count: number;
   created_at: string;
@@ -41,6 +42,7 @@ export interface Message {
 
 export interface SessionData {
   key: string;
+  title?: string;
   messages: Message[];
   summary: string;
   model: string;
@@ -50,6 +52,7 @@ export interface SessionData {
   input_tokens: number;
   output_tokens: number;
   compaction_count: number;
+  extra_meta?: Record<string, string>;
   created: string;
   updated: string;
 }
@@ -60,16 +63,71 @@ export interface RunRequest {
   channel?: string;
   user_id?: string;
   stream?: boolean;
+  kind?: string;
 }
 
 export interface RunResult {
   content: string;
+  title?: string;
   runId: string;
   iterations: number;
   usage: {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+  };
+}
+
+export interface OpenAIChatCompletionRequest {
+  messages: Message[];
+  model?: string;
+  stream?: boolean;
+  max_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+}
+
+export interface OpenAIChatCompletionResponse {
+  id: string;
+  object: "chat.completion";
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message: {
+      role: "assistant";
+      content: string;
+    };
+    finish_reason: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+export interface OpenAIChatCompletionChunk {
+  id?: string;
+  object?: "chat.completion.chunk";
+  created?: number;
+  model?: string;
+  choices?: Array<{
+    index: number;
+    delta?: {
+      role?: "assistant";
+      content?: string;
+    };
+    finish_reason?: string | null;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  error?: {
+    message?: string;
+    type?: string;
   };
 }
 
@@ -102,7 +160,13 @@ export interface ContextFile {
 
 // SSE event types
 export interface SSEEvent {
-  type: "run.started" | "chunk" | "tool.call" | "tool.result" | "run.completed" | "run.failed";
+  type:
+    | "run.started"
+    | "chunk"
+    | "tool.call"
+    | "tool.result"
+    | "run.completed"
+    | "run.failed";
   agentId: string;
   runId: string;
   payload: Record<string, unknown>;
@@ -125,6 +189,7 @@ export interface ToolResultPayload {
 
 export interface RunCompletedPayload {
   content: string;
+  title?: string;
   output_preview: string;
   input_tokens: number;
   output_tokens: number;
@@ -153,14 +218,22 @@ export interface MCPFunction {
 export interface MCPServer {
   name: string;
   url: string;
+  auth_type: "bearer" | "oauth" | string;
   enabled: boolean;
   description: string;
   has_auth: boolean;
+  oauth_provider?: string;
+  oauth_connected: boolean;
+  oauth_expires_at?: string | null;
   last_synced: string | null;
   created_at: string;
   updated_at: string;
   functions: MCPFunction[];
   warning?: string;
+}
+
+export interface MCPOAuthStart {
+  authorization_url: string;
 }
 
 export interface AllowedTool {
@@ -195,4 +268,51 @@ export interface KnowledgeBase {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Routine {
+  id: string;
+  workspace_id: string;
+  name: string;
+  prompt: string;
+  model?: string;
+  session_prefix: string;
+  enabled: boolean;
+  schedule_cron?: string;
+  schedule_tz: string;
+  temporal_schedule_id?: string;
+  has_fire_token: boolean;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutineRun {
+  id: string;
+  routine_id: string;
+  workspace_id: string;
+  trigger_type: "schedule" | "api" | "manual";
+  status: "running" | "success" | "failed";
+  session_key?: string;
+  workflow_id?: string;
+  temporal_run_id?: string;
+  input_text?: string;
+  output_preview?: string;
+  error?: string;
+  input_tokens: number;
+  output_tokens: number;
+  iterations: number;
+  started_at: string;
+  finished_at?: string;
+  duration_ms: number;
+}
+
+export interface CreateRoutineResp {
+  routine: Routine;
+  fire_token?: string;
+}
+
+export interface FireRunResp {
+  workflow_id: string;
+  run_id: string;
 }

@@ -26,7 +26,7 @@ interface ChatState {
   abortController: AbortController | null;
 
   setMessages: (msgs: Message[]) => void;
-  sendMessage: (sessionKey: string, text: string) => Promise<void>;
+  sendMessage: (sessionKey: string, text: string) => Promise<{ title?: string }>;
   stopStreaming: () => void;
   reset: () => void;
 }
@@ -57,12 +57,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     let completed = false;
     let aborted = false;
+    let completedTitle: string | undefined;
 
     try {
       const response = await agent.runStream({
         session_key: sessionKey,
         message: text,
         stream: true,
+        kind: "user",
       }, controller.signal);
 
       if (!response.ok) {
@@ -133,7 +135,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
             case "run.completed": {
               completed = true;
-              const { content } = event.payload as { content: string };
+              const payload = event.payload as { content?: unknown; title?: unknown };
+              const content = typeof payload.content === "string" ? payload.content : "";
+              const title = typeof payload.title === "string" ? payload.title : "";
+              completedTitle = title.trim() || undefined;
               const streamed = get().streamingContent;
               // Prefer streamed content over "..." fallback from backend
               const finalContent = (streamed && content === "...") ? streamed : (content || streamed);
@@ -188,6 +193,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } else {
         set({ abortController: null });
       }
+      return { title: completedTitle };
     } catch (err) {
       const isAbort = err instanceof DOMException && err.name === "AbortError";
       if (isAbort) aborted = true;
@@ -211,6 +217,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         }
       }
+      return { title: completedTitle };
     }
   },
 

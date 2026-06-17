@@ -123,9 +123,43 @@ func (c *Cache) get(ctx context.Context, workspaceID string) *wsEntry {
 	return c.load(ctx, workspaceID)
 }
 
+// allowedSkillsKey is the context key for agent-allowed skill names/IDs.
+type allowedSkillsKey struct{}
+
+// WithAllowedSkills stores the list of allowed skill names/IDs in context.
+func WithAllowedSkills(ctx context.Context, names []string) context.Context {
+	return context.WithValue(ctx, allowedSkillsKey{}, names)
+}
+
+// AllowedSkillsFromContext returns the allowed skill names/IDs from context.
+func AllowedSkillsFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	names, _ := ctx.Value(allowedSkillsKey{}).([]string)
+	return names
+}
+
 // Search performs a BM25 search over the workspace's cached skills.
 func (c *Cache) Search(ctx context.Context, workspaceID, query string, maxResults int) []SearchResult {
-	return c.get(ctx, workspaceID).index.Search(ctx, query, maxResults)
+	results := c.get(ctx, workspaceID).index.Search(ctx, query, maxResults)
+
+	// Enforce allowed skills
+	if allowed := AllowedSkillsFromContext(ctx); allowed != nil {
+		allowedSet := make(map[string]bool)
+		for _, s := range allowed {
+			allowedSet[s] = true
+		}
+		var filtered []SearchResult
+		for _, r := range results {
+			if allowedSet[r.Name] {
+				filtered = append(filtered, r)
+			}
+		}
+		return filtered
+	}
+
+	return results
 }
 
 // Get returns a skill by name from the workspace's cache.
@@ -133,6 +167,27 @@ func (c *Cache) Get(ctx context.Context, workspaceID, name string) (*store.Skill
 	e := c.get(ctx, workspaceID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	// Enforce allowed skills
+	if allowed := AllowedSkillsFromContext(ctx); allowed != nil {
+		allowedSet := make(map[string]bool)
+		for _, s := range allowed {
+			allowedSet[s] = true
+		}
+		var found *store.Skill
+		for i := range e.skills {
+			if e.skills[i].Name == name {
+				found = &e.skills[i]
+				break
+			}
+		}
+		if found != nil && (allowedSet[found.Name] || allowedSet[found.ID]) {
+			sk := *found
+			return &sk, true
+		}
+		return nil, false
+	}
+
 	for i := range e.skills {
 		if e.skills[i].Name == name {
 			sk := e.skills[i]
@@ -147,6 +202,22 @@ func (c *Cache) List(ctx context.Context, workspaceID string) []store.Skill {
 	e := c.get(ctx, workspaceID)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
+	// Enforce allowed skills
+	if allowed := AllowedSkillsFromContext(ctx); allowed != nil {
+		allowedSet := make(map[string]bool)
+		for _, s := range allowed {
+			allowedSet[s] = true
+		}
+		var filtered []store.Skill
+		for _, s := range e.skills {
+			if allowedSet[s.Name] || allowedSet[s.ID] {
+				filtered = append(filtered, s)
+			}
+		}
+		return filtered
+	}
+
 	out := make([]store.Skill, len(e.skills))
 	copy(out, e.skills)
 	return out
@@ -174,6 +245,36 @@ func (c *Cache) BuildSummary(ctx context.Context, workspaceID string, maxInline 
 	skills := e.skills
 	c.mu.RUnlock()
 
+	return c.buildSummaryWithSkills(skills, maxInline)
+}
+
+// BuildSummaryFiltered generates an XML summary of only the allowed skills.
+func (c *Cache) BuildSummaryFiltered(ctx context.Context, workspaceID string, maxInline int, allowedSkills []string) string {
+	e := c.get(ctx, workspaceID)
+	c.mu.RLock()
+	skills := e.skills
+	c.mu.RUnlock()
+
+	if len(skills) == 0 {
+		return ""
+	}
+
+	allowedSet := make(map[string]bool)
+	for _, s := range allowedSkills {
+		allowedSet[s] = true
+	}
+
+	var filtered []store.Skill
+	for _, s := range skills {
+		if allowedSet[s.Name] || allowedSet[s.ID] {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return c.buildSummaryWithSkills(filtered, maxInline)
+}
+
+func (c *Cache) buildSummaryWithSkills(skills []store.Skill, maxInline int) string {
 	if len(skills) == 0 {
 		return ""
 	}

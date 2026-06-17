@@ -1,8 +1,11 @@
-import { useEffect, useRef, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useCallback, useEffect, useLayoutEffect, useRef, useMemo, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router";
 import { ArrowLeft, ChevronUp } from "lucide-react";
 import { sessions, ApiError } from "@/lib/api";
 import { useChatStore } from "@/stores/chat";
+import { useSessionsStore } from "@/stores/sessions";
+import { takeQueuedChatPrompt } from "@/lib/chat-session";
+import { getSessionDisplayTitle, NEW_SESSION_TITLE } from "@/lib/session-title";
 import type { ThinkingStep } from "@/stores/chat";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -93,12 +96,19 @@ const PAGE_SIZE = 20;
 export default function SessionDetailPage() {
   const { key } = useParams<{ key: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const decodedKey = key ? decodeURIComponent(key) : "";
+  const shouldFocusChatInput =
+    (location.state as { focusChatInput?: boolean } | null)?.focusChatInput ===
+    true;
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollWrapRef = useRef<HTMLDivElement>(null);
   const streamStartRef = useRef<number>(0);
+  const initialPromptSentRef = useRef<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [sessionTitle, setSessionTitle] = useState(NEW_SESSION_TITLE);
   const prevMessagesLenRef = useRef(0);
+  const loadSessions = useSessionsStore((s) => s.loadSessions);
 
   const {
     messages,
@@ -112,6 +122,30 @@ export default function SessionDetailPage() {
     stopStreaming,
     reset,
   } = useChatStore();
+
+  const refreshSessionTitle = useCallback(async (sessionKey: string) => {
+    try {
+      const data = await sessions.get(sessionKey);
+      setSessionTitle(getSessionDisplayTitle(data));
+    } catch {
+      // Keep the current title; message send/load errors are surfaced elsewhere.
+    }
+  }, []);
+
+  const refreshAfterRun = useCallback(
+    (sessionKey: string) => {
+      void loadSessions();
+      void refreshSessionTitle(sessionKey);
+    },
+    [loadSessions, refreshSessionTitle],
+  );
+
+  const applyGeneratedTitle = useCallback((title?: string) => {
+    const nextTitle = title?.trim();
+    if (nextTitle) {
+      setSessionTitle(nextTitle);
+    }
+  }, []);
 
   // Build display segments from history messages.
   // If we have live thinkingSteps (from SSE), inject them before the last assistant message
@@ -153,29 +187,62 @@ export default function SessionDetailPage() {
   useEffect(() => {
     reset();
     setVisibleCount(PAGE_SIZE);
+    setSpacerHeight(0);
+    setSessionTitle(NEW_SESSION_TITLE);
     if (!decodedKey) return;
+    let cancelled = false;
     sessions
       .get(decodedKey)
-      .then((data) => setMessages(data.messages ?? []))
+      .then((data) => {
+        if (cancelled) return;
+        const loadedMessages = data.messages ?? [];
+        setMessages(loadedMessages);
+        setSessionTitle(getSessionDisplayTitle(data));
+
+        const queuedPrompt = takeQueuedChatPrompt(decodedKey);
+        if (
+          queuedPrompt &&
+          loadedMessages.length === 0 &&
+          initialPromptSentRef.current !== decodedKey
+        ) {
+          initialPromptSentRef.current = decodedKey;
+          void sendMessage(decodedKey, queuedPrompt)
+            .then(({ title }) => applyGeneratedTitle(title))
+            .finally(() => refreshAfterRun(decodedKey));
+        }
+      })
       .catch((err) => {
+        if (cancelled) return;
         if (err instanceof ApiError && err.status === 403) {
           navigate("/sessions");
           return;
         }
         setMessages([]);
       });
-  }, [decodedKey, setMessages, reset]);
+    return () => {
+      cancelled = true;
+    };
+  }, [decodedKey, setMessages, reset, navigate, sendMessage, applyGeneratedTitle, refreshAfterRun]);
 
   // When new messages are appended (user send, agent reply), grow visibleCount so the
   // newest entries stay visible. Initial session load (prev was 0) does NOT bump —
   // we want it to stay at PAGE_SIZE so the user starts with the latest page only.
   useEffect(() => {
     const prev = prevMessagesLenRef.current;
-    if (prev > 0 && messages.length > prev) {
-      setVisibleCount((c) => c + (messages.length - prev));
+    const current = messages.length;
+    prevMessagesLenRef.current = current;
+
+    if (prev > 0 && current > prev) {
+      setVisibleCount((c) => c + (current - prev));
+      if (streaming) {
+        setSmoothScrollActive(true);
+        const timer = setTimeout(() => {
+          setSmoothScrollActive(false);
+        }, 500);
+        return () => clearTimeout(timer);
+      }
     }
-    prevMessagesLenRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, streaming]);
 
   // Paginate segments: show only the most recent `visibleCount` entries.
   // Older entries are revealed via the "Load older" button at the top.
@@ -185,6 +252,55 @@ export default function SessionDetailPage() {
   }, [segments, visibleCount]);
 
   const hiddenCount = Math.max(0, segments.length - visibleCount);
+
+  // Split visibleSegments during streaming to isolate the active user message
+  const normalSegments = useMemo(() => {
+    if (!streaming || visibleSegments.length === 0) return visibleSegments;
+    return visibleSegments.slice(0, -1);
+  }, [visibleSegments, streaming]);
+
+  const activeUserSegment = useMemo(() => {
+    if (!streaming || visibleSegments.length === 0) return null;
+    return visibleSegments[visibleSegments.length - 1];
+  }, [visibleSegments, streaming]);
+
+  const [smoothScrollActive, setSmoothScrollActive] = useState(false);
+  const [spacerHeight, setSpacerHeight] = useState(0);
+  const activeInteractionRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!streaming) return;
+
+    const viewport = scrollWrapRef.current?.querySelector(
+      '[data-slot="scroll-area-viewport"]'
+    ) as HTMLDivElement | null;
+    const activeEl = activeInteractionRef.current;
+
+    if (!viewport || !activeEl) {
+      setSpacerHeight(0);
+      return;
+    }
+
+    const updateHeights = () => {
+      const vHeight = viewport.clientHeight;
+      const aHeight = activeEl.offsetHeight;
+      const neededSpacer = Math.max(0, vHeight - aHeight);
+      setSpacerHeight(neededSpacer);
+    };
+
+    updateHeights();
+
+    const observer = new ResizeObserver(() => {
+      updateHeights();
+    });
+
+    observer.observe(activeEl);
+    observer.observe(viewport);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [streaming, normalSegments.length]);
 
   const handleLoadMore = () => {
     const viewport = scrollWrapRef.current?.querySelector(
@@ -202,38 +318,42 @@ export default function SessionDetailPage() {
     });
   };
 
-  // Scroll to bottom: instant during streaming, smooth for discrete events
+  // Scroll to bottom: smooth on initial user send, instant during live stream content growth
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: streaming ? "instant" : "smooth" });
-  }, [messages, streamingContent, toolCalls, streaming]);
+    const behavior = smoothScrollActive ? "smooth" : (streaming ? "instant" : "smooth");
+    bottomRef.current?.scrollIntoView({ behavior });
+  }, [messages, streamingContent, toolCalls, streaming, spacerHeight, smoothScrollActive]);
 
   const handleSend = (text: string) => {
     if (!decodedKey) return;
-    sendMessage(decodedKey, text);
+    void sendMessage(decodedKey, text)
+      .then(({ title }) => applyGeneratedTitle(title))
+      .finally(() => refreshAfterRun(decodedKey));
   };
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-border/50 bg-sidebar px-3 py-3 sm:px-4">
+      <div className="flex shrink-0 items-center p-2 gap-2">
         <Button
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer"
+          className="cursor-pointer p-4 rounded-3xl bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={() => navigate("/sessions")}
         >
           <ArrowLeft className="size-4" />
         </Button>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-primary" />
-          <h2 className="truncate font-mono text-sm font-medium text-foreground">{decodedKey}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
+            {sessionTitle}
+          </h2>
         </div>
       </div>
 
       {/* Messages */}
       <div ref={scrollWrapRef} className="flex min-h-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1 bg-background p-4">
-        <div className="mx-auto max-w-3xl space-y-6">
+        <div className="mx-auto max-w-4xl space-y-0">
           {hiddenCount > 0 && (
             <div className="flex justify-center">
               <Button
@@ -248,7 +368,7 @@ export default function SessionDetailPage() {
               </Button>
             </div>
           )}
-          {visibleSegments.map((seg, i) =>
+          {normalSegments.map((seg, i) =>
             seg.kind === "message" ? (
               <ChatMessage key={i} role={seg.msg.role} content={seg.msg.content} />
             ) : (
@@ -262,26 +382,51 @@ export default function SessionDetailPage() {
             )
           )}
 
-          {/* Live streaming: ThinkingBlock */}
-          {streaming && (
-            <ThinkingBlock
-              steps={thinkingSteps}
-              toolCalls={toolCalls}
-              startTime={streamStartRef.current || Date.now()}
-              isActive={!streamingContent}
-              livePreview={streamingContent}
-            />
-          )}
+          {/* Active interaction wrapper */}
+          {streaming && activeUserSegment ? (
+            <div ref={activeInteractionRef} className="space-y-0 flex flex-col">
+              {activeUserSegment.kind === "message" ? (
+                <ChatMessage role={activeUserSegment.msg.role} content={activeUserSegment.msg.content} />
+              ) : (
+                <ThinkingBlock
+                  steps={activeUserSegment.steps}
+                  toolCalls={[]}
+                  startTime={0}
+                  isActive={false}
+                />
+              )}
 
-          {/* Streaming content */}
-          {streaming && streamingContent && (
-            <ChatMessage role="assistant" content={streamingContent} />
-          )}
+              {/* Live streaming: ThinkingBlock */}
+              <ThinkingBlock
+                steps={thinkingSteps}
+                toolCalls={toolCalls}
+                startTime={streamStartRef.current || Date.now()}
+                isActive={!streamingContent}
+                livePreview={streamingContent}
+              />
+
+              {/* Streaming content */}
+              {streamingContent && (
+                <ChatMessage from="assistant" content={streamingContent} />
+              )}
+            </div>
+          ) : null}
 
           {error && (
             <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
+          )}
+
+          {/* Bottom Spacer for Vercel v0 UX */}
+          {spacerHeight > 0 && (
+            <div 
+              style={{ 
+                height: `${spacerHeight}px`,
+                transition: streaming ? "none" : "height 300ms cubic-bezier(0.16, 1, 0.3, 1)"
+              }} 
+              className="w-full animate-none"
+            />
           )}
 
           <div ref={bottomRef} />
@@ -294,6 +439,8 @@ export default function SessionDetailPage() {
         onSend={handleSend}
         onStop={stopStreaming}
         streaming={streaming}
+        autoFocus={shouldFocusChatInput}
+        focusKey={location.key}
       />
     </div>
   );
