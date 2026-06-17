@@ -84,10 +84,8 @@ jobs:
 
   deploy:
     needs: build-and-push
-    # Deploy is manual-only: it runs when the workflow is triggered by hand
-    # (Run workflow / workflow_dispatch). On a plain push, build-and-push still
-    # runs and pushes the image, but this job is skipped.
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    # Auto-deploy: rolls out the freshly built image on every push to main (and on
+    # manual workflow_dispatch runs). Runs only after build-and-push succeeds.
     runs-on: ubuntu-latest
     steps:
       - name: Roll out new version on AgentBase

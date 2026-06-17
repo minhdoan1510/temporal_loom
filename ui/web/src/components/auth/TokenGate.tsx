@@ -16,7 +16,7 @@ type Status = "idle" | "verifying" | "cas" | "onboarding" | "ok";
 // Prefilled into the token field on the login screen so users can connect with a
 // single click during the demo. Override by clearing the field and pasting another.
 const DEFAULT_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsIm5hbWUiOiJhZG1pbiIsInJvbGUiOiIiLCJleHAiOjk3ODE2MTMwODgsImlhdCI6MTc4MTUyNjY4OH0.72v51D869B5Gf1ATNJjGpvf7j_H0wkJpxKryxbkZEZs";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtaW5oZGMzIiwibmFtZSI6Im1pbmhkYzMiLCJyb2xlIjoiIiwiZXhwIjo5NzgxNjEzMDg4LCJpYXQiOjE3ODE1MjY2ODh9.f7-yQtRJhq0Lfe6BxCVFasoa8NrIJ98lXpcTyMsOagM";
 
 // Is this page load the CAS redirect callback (/sso/cas?ticket=...)? The app
 // uses HashRouter, so this is a real path + query string handled here rather
