@@ -1,315 +1,219 @@
-# Lending Claw
+# Temporal Loom
 
-AI agent platform for Zalopay operations. A generic think-act-observe agent loop with extensible tools, DB-backed skills, and multi-channel support.
+Temporal Loom helps teams build focused AI agent workspaces around real
+operational workflows. Each workspace can bring its own knowledge, tools,
+settings, permissions, routines, skills, and answer-ready chat experience.
 
-**First use case**: CS ticket resolution — investigating and responding to JIRA tickets using loan data, application logs, and knowledge base search.
+The first configured workspace is **Lending Claw**, a Cashloan CS workspace for
+investigating loan applications, partner callbacks, onboarding evidence, report
+data, and customer-service tickets.
+
+> Full documentation lives in [`docs/`](docs/): architecture, codebase summary,
+> code standards, deployment, design guidelines, and roadmap.
+
+## What Temporal Loom Provides
+
+Temporal Loom is more than a chat surface. It gives every workspace the product
+controls needed to keep answers grounded in team context and connected systems.
+
+| Feature               | What it does                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Routines              | Turns repeated team questions into scheduled agent runs with timing, status, and execution history.                              |
+| Built-in skills       | Stores reusable `SKILL.md` bundles and lets teams generate new skills from workflows with AI.                                    |
+| Knowledge bases       | Indexes Confluence or Markdown sources into Qdrant so agents retrieve approved workspace context before answering.               |
+| Appearance and access | Gives admins workspace-level theme, accent color, and tab-level access controls.                                                 |
+| MCP servers           | Connects authenticated Model Context Protocol servers for internal APIs, documents, tickets, mail, search, and evidence sources. |
+| Chat sessions         | Keeps chat history scoped to the workspace so investigations, reports, and handoffs stay traceable.                              |
+
+## Lending Claw Workspace
+
+Lending Claw is a Temporal Loom workspace configured for Cashloan CS. It turns
+loan IDs, partner callbacks, logs, and onboarding evidence into investigation
+cards and grounded answers.
+
+Primary Lending Claw workflows:
+
+- **Check a loan application**: read onboarding status, partner, amount,
+  contract IDs, and the failing step from one prompt.
+- **Pinpoint partner errors**: connect callbacks and internal functions so the
+  team can see where a flow broke.
+- **Compare partner performance**: produce chart-backed readouts for loan count,
+  disbursement amount, and ticket-size differences.
+- **Understand onboarding drop-off**: review the funnel from app open to
+  approval, contract signing, and final disbursement.
+
+## Workspace Use Cases
+
+The same workspace model can be adapted beyond Lending Claw:
+
+- **Customer Services**: summarize customer context, classify issues, and draft
+  the next response from workspace knowledge.
+- **Query Report Data**: ask questions over report data and get chart-backed
+  readouts for review.
+- **Marketing**: turn campaign notes, audience signals, and competitor context
+  into usable briefs.
+- **Planner**: build milestones, owners, dependencies, and decision notes.
+- **Report readout**: explain metric movement and prepare review summaries.
+- **Data cleanup**: find mismatched values, duplicates, and records that need
+  follow-up.
+- **Evidence summary**: turn logs, files, and tool output into a readable
+  timeline.
+- **Customer reply**: draft concise updates from the resolved investigation.
+- **Source compare**: highlight agreement and gaps across internal systems.
+- **Status report**: package progress, blockers, and owner actions.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Channels["Channels"]
+    subgraph Channels
         CLI["CLI"]
         HTTP["HTTP + SSE"]
-        JIRA_WH["JIRA Webhook"]
+        WEB["React SPA"]
+        DESK["Desktop shell"]
     end
 
-    subgraph AgentLoop["Agent Loop\n(think->act->observe)"]
-        SP["System Prompt"]
-        SK["Skills (BM25)"]
-        MEM["Memory (Qdrant)"]
-        HP["History Pruning"]
+    subgraph Core["Temporal Loom (Go)"]
+        LOOP["Agent loop"]
+        REG["Tool registry"]
+        SK["Workspace skills"]
+        MEM["Memory"]
+        RBAC["Workspace access"]
     end
 
-    subgraph Tools["Tools"]
-        JIRA["JIRA read/comment"]
-        OS["OpenSearch log search"]
-        KB["Qdrant KB search"]
-        LOAN["gRPC loan detail"]
+    subgraph MCP["mcp/ module"]
+        JIRA["Jira"]
+        OS["OpenSearch"]
+        LOAN["Loan APIs"]
+        EXTTOOLS["Other MCP servers"]
     end
 
-    subgraph Storage["Storage"]
-        MySQL["MySQL"]
-        Qdrant["Qdrant vectors"]
-    end
+    LLM["OpenAI-compatible LLM"]
+    MySQL[("MySQL")]
+    Qdrant[("Qdrant")]
 
-    LLM["LLM Provider"]
-
-    Channels --> AgentLoop
-    AgentLoop <--> Tools
-    AgentLoop <--> LLM
-    AgentLoop <--> Storage
-    Tools --> JIRA_EXT["JIRA REST API"]
-    Tools --> OS_EXT["OpenSearch"]
-    Tools --> QB_EXT["Qdrant"]
-    Tools --> GRPC_EXT["Onboarding gRPC"]
+    Channels --> Core
+    LOOP <--> LLM
+    REG --> MCP
+    SK --> MySQL
+    MEM --> MySQL
+    MEM --> Qdrant
+    Core --> MySQL
+    MCP --> EXT["Jira / OpenSearch / Onboarding / Data sources"]
 ```
 
-### Agent Loop Detail
-
-```mermaid
-sequenceDiagram
-    participant U as User / Channel
-    participant A as Agent Loop
-    participant L as LLM Provider
-    participant T as Tools
-    participant S as MySQL Store
-
-    U->>A: Message (session_key, text)
-    A->>S: Load session history
-    A->>A: Build system prompt
-
-    loop Max 20 iterations
-        A->>L: Chat(messages + tool definitions)
-        L-->>A: Response (text or tool_calls)
-
-        alt Has tool_calls
-            A->>T: Execute tools (parallel/sequential)
-            T-->>A: Tool results
-            A->>A: Append to messages
-        else No tool_calls
-            A->>A: Final response ready
-        end
-    end
-
-    A->>S: Save session (messages + summary)
-    A->>A: Auto-summarize if history too large
-    A-->>U: Response (text or SSE stream)
-```
+The backend runs a bounded think-act-observe loop: it calls an
+OpenAI-compatible LLM, executes in-process platform tools or remote MCP tools,
+observes the result, and repeats until it produces a final answer. Workspace
+knowledge and long-term memory are backed by MySQL and Qdrant. Domain tools are
+exposed through the separate `mcp/` module.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Go 1.24, Cobra CLI, `database/sql` + MySQL |
-| LLM | OpenAI-compatible API (via LiteLLM) |
-| Vector DB | Qdrant (knowledge base + memory embeddings) |
-| External | JIRA REST, OpenSearch, Onboarding gRPC |
-| Frontend | React 19, Vite 6, TypeScript, Tailwind CSS 4, shadcn/ui |
-| State | Zustand (chat streaming), React Router 7 |
+| Layer          | Technology                                                      |
+| -------------- | --------------------------------------------------------------- |
+| Backend        | Go 1.25, Cobra CLI, `database/sql`, MySQL 8                     |
+| LLM            | OpenAI-compatible API                                           |
+| Vector DB      | Qdrant                                                          |
+| Auth           | HMAC JWT, Casbin RBAC by workspace                              |
+| External tools | Jira REST, OpenSearch, Onboarding gRPC, Confluence, MCP servers |
+| Frontend       | React 19, Vite 7, TypeScript, Tailwind v4, Vercel AI SDK        |
+| Desktop        | Zig `zero-native` WebView shell                                 |
+| Observability  | OpenTelemetry, slog                                             |
+
+## Repository Layout
+
+```
+cmd/         CLI commands and manual DI
+internal/    agent, tools, providers, store, skills, memory, mcp,
+             services, transport, config, bootstrap
+pkg/         crypto, httputil, rbac, telemetry
+migrations/  MySQL migrations
+config/      YAML config
+ui/          web React app and Zig desktop shell
+mcp/         remote MCP server module
+docs/        project documentation
+```
 
 ## Quick Start
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
+- Node.js 22+ with pnpm
 - MySQL 8.0+
-- Node.js 20+ with pnpm (for UI)
+- Qdrant
+- `GOPRIVATE=gitlab.zalopay.vn` for internal modules
 
-### 1. Configure
+### 1. Start local infrastructure
+
+```bash
+docker compose up -d
+```
+
+### 2. Configure the app
 
 ```bash
 vi config/config.yaml
 ```
 
-### 2. Build & Migrate
+Set the local LLM, MySQL, Qdrant, server, and integration values needed by your
+workspace.
+
+### 3. Run the backend
 
 ```bash
 go build -o lending-claw .
-./lending-claw migrate up
-```
-
-### 3. Run
-
-**HTTP server** (API + SSE streaming):
-
-```bash
 ./lending-claw serve -v
-# Listening on 0.0.0.0:8080
 ```
 
-**CLI chat** (interactive):
+The HTTP API runs at `http://localhost:8080`.
+
+### 4. Run the web UI
 
 ```bash
-./lending-claw chat
-# or one-shot:
-./lending-claw chat -m "Check ticket LENDING-123"
+cd ui/web
+pnpm install
+pnpm dev
 ```
 
-**Web UI** (development):
+The development UI runs at `http://localhost:5173` and proxies `/api` to the
+backend.
+
+### 5. Run the desktop shell
 
 ```bash
-cd ui/web && pnpm install && pnpm dev
-# http://localhost:5173 (proxies /api → localhost:8080)
+ui/run_dev.sh
 ```
 
-## Project Structure
+## API Surface
 
-```
-├── main.go                        # Entry point
-├── cmd/
-│   ├── root.go                    # CLI root + logging
-│   ├── serve.go                   # HTTP server command
-│   ├── chat.go                    # Interactive/one-shot chat
-│   ├── migrate.go                 # Database migrations
-│   └── wire.go                    # Dependency injection
-├── internal/
-│   ├── agent/
-│   │   ├── loop.go                # Core think-act-observe cycle
-│   │   ├── systemprompt.go        # System prompt builder
-│   │   ├── history.go             # Message history + summarization
-│   │   ├── pruning.go             # Context window pruning
-│   │   ├── memoryflush.go         # Auto memory persistence
-│   │   └── tracing.go             # Run/span recording
-│   ├── tools/
-│   │   ├── registry.go            # Tool registration + execution
-│   │   ├── jira.go                # JIRA read/comment/get_comments
-│   │   ├── knowledge.go           # Qdrant knowledge base search
-│   │   ├── opensearch.go          # Log search + trace lookup
-│   │   ├── loan.go                # gRPC loan detail/customer_loans
-│   │   ├── skill_search.go        # BM25 skill search + read
-│   │   └── memory.go              # Memory search + get
-│   ├── providers/
-│   │   ├── openai.go              # OpenAI-compatible LLM provider
-│   │   └── retry.go               # Exponential backoff retry
-│   ├── store/                     # Interface definitions
-│   │   └── mysql/                 # MySQL implementations
-│   ├── skills/
-│   │   ├── cache.go               # In-memory skill cache
-│   │   └── search.go              # BM25 search index
-│   ├── memory/                    # Long-term memory (Qdrant + MySQL)
-│   ├── services/                  # External clients (JIRA, OpenSearch, Qdrant, gRPC)
-│   ├── http/
-│   │   ├── router.go              # API routes + middleware
-│   │   └── agent.go               # SSE streaming handler
-│   ├── config/                    # YAML + env config loading
-│   └── bootstrap/                 # Context file seeding
-├── migrations/                    # MySQL migration files
-├── ui/web/                        # React dashboard
-│   └── src/
-│       ├── pages/                 # Sessions, Skills, Context Files, Traces
-│       ├── stores/chat.ts         # Zustand SSE streaming state
-│       ├── lib/api.ts             # Typed API client
-│       └── lib/sse.ts             # POST-based SSE parser
-└── config.yaml                    # Configuration file
-```
+Workspace-scoped routes are under `/api/v1/workspaces/{wsID}`.
 
-## API Endpoints
+| Method                | Path                  | Description                                               |
+| --------------------- | --------------------- | --------------------------------------------------------- |
+| `GET`                 | `/health`             | Health check                                              |
+| `POST`                | `/api/v1/set-token`   | Set auth cookie                                           |
+| `POST`                | `{ws}/agent/run`      | Execute an agent run, with SSE support when `stream:true` |
+| `GET`                 | `{ws}/sessions`       | List chat sessions                                        |
+| `GET/DELETE`          | `{ws}/sessions/{key}` | Get or delete a chat session                              |
+| `GET/POST`            | `{ws}/skills`         | List or create workspace skills                           |
+| `GET/PUT/DELETE`      | `{ws}/skills/{id}`    | Manage a skill                                            |
+| `GET/POST/PUT/DELETE` | `{ws}/context-files`  | Manage context files                                      |
+| `GET/POST`            | `{ws}/knowledge`      | Manage knowledge bases and syncs                          |
+| `GET/POST`            | `{ws}/mcp/servers`    | Manage MCP servers, refreshes, and function toggles       |
+| `GET/POST`            | `{ws}/rbac/roles`     | Manage roles and members                                  |
+| `GET`                 | `{ws}/rbac/me`        | Inspect current workspace access                          |
+| `GET`                 | `{ws}/traces`         | List traces                                               |
+| `GET`                 | `{ws}/traces/{id}`    | Inspect trace spans                                       |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check |
-| `POST` | `/api/v1/agent/run` | Execute agent (supports SSE streaming) |
-| `GET` | `/api/v1/sessions` | List sessions |
-| `GET` | `/api/v1/sessions/{key}` | Get session with messages |
-| `DELETE` | `/api/v1/sessions/{key}` | Delete session |
-| `GET` | `/api/v1/skills` | List skills |
-| `POST` | `/api/v1/skills` | Create skill |
-| `GET` | `/api/v1/skills/{id}` | Get skill |
-| `PUT` | `/api/v1/skills/{id}` | Update skill |
-| `DELETE` | `/api/v1/skills/{id}` | Delete skill |
-| `GET` | `/api/v1/context-files` | List context files |
-| `PUT` | `/api/v1/context-files` | Create/update context file |
-| `GET` | `/api/v1/traces` | List traces (paginated) |
-| `GET` | `/api/v1/traces/{id}` | Get trace with spans |
+## Documentation
 
-### SSE Streaming
-
-`POST /api/v1/agent/run` with `"stream": true` returns Server-Sent Events:
-
-```
-event: chunk
-data: {"content": "Let me check..."}
-
-event: tool.call
-data: {"id": "tc_1", "name": "read_jira_ticket"}
-
-event: tool.result
-data: {"id": "tc_1", "is_error": false}
-
-event: run.completed
-data: {"content": "The ticket LENDING-123 is..."}
-```
-
-## Tools
-
-### Platform (always available)
-
-| Tool | Description |
-|------|-------------|
-| `skill_search` | BM25 search over DB-backed skills |
-| `read_skill` | Read full skill content by name |
-| `memory_search` | Semantic search over long-term memory |
-| `memory_get` | Get specific memory document |
-
-### Domain (CS use case)
-
-| Tool | Source | Description |
-|------|--------|-------------|
-| `read_jira_ticket` | JIRA REST | Get ticket details |
-| `comment_jira` | JIRA REST | Post JIRA wiki comment |
-| `get_jira_comments` | JIRA REST | Get ticket comments |
-| `search_knowledge` | Qdrant | Search knowledge base |
-| `search_http_errors` | OpenSearch | Search application logs |
-| `get_logs_by_trace_id` | OpenSearch | Trace request across services |
-| `get_loan_detail` | gRPC | Get loan application status |
-| `get_customer_loans` | gRPC | List customer loans by Zalo ID |
-
-## Skills System
-
-Skills are stored in MySQL and define agent behavior. The agent loop injects them into the system prompt in two modes:
-
-- **Inline mode** (<=20 skills): Skills are embedded as XML in the system prompt. The LLM sees them directly.
-- **Search mode** (>20 skills): The system prompt instructs the LLM to call `skill_search` → `read_skill` to find and load relevant skills on demand.
-
-Skills are managed via the `/api/v1/skills` CRUD API or the web UI.
-
-## Configuration
-
-YAML config with environment variable overrides (`LENDING_CLAW_<SECTION>_<KEY>`):
-
-```yaml
-server:
-  host: "0.0.0.0"
-  port: 8080
-  token: ""                          # bearer auth (optional)
-
-llm:
-  provider: "litellm"
-  model: "gemini/gemini-3.1-pro-preview"
-  base_url: "https://litellm.example.com/v1"
-  api_key: ""                        
-
-agent:
-  max_iterations: 20
-  context_window: 200000
-
-mysql:
-  dsn: ""                            
-
-jira:
-  url: "https://jira.example.com"
-  personal_token: ""                 
-
-opensearch:
-  host: ""
-  port: 9200
-  user: ""
-  password: ""                       
-
-qdrant:
-  host: ""
-  port: 443
-  api_key: ""                        
-
-embedding:
-  base_url: ""
-  model: "qwen3-embedding-0.6b"
-  vector_size: 1024
-
-skills:
-  cache_refresh_interval: 5m
-```
-
-## Development
-
-```bash
-# Build
-go build -o lending-claw .
-
-# Web UI dev
-cd ui/web && pnpm dev
-
-# Production UI build
-cd ui/web && pnpm build
-```
+- [`docs/architecture.md`](docs/architecture.md) - system architecture
+- [`docs/agent-loop.md`](docs/agent-loop.md) - agent execution loop
+- [`docs/context-management.md`](docs/context-management.md) - context handling
+- [`docs/memory.md`](docs/memory.md) - memory model
+- [`docs/rbac.md`](docs/rbac.md) - workspace access control
+- [`docs/skills.md`](docs/skills.md) - workspace skills
+- [`docs/tools.md`](docs/tools.md) - tool registry and tool execution
+- [`docs/design.md`](docs/design.md) - product and UI design notes
