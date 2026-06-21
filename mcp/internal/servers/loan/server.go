@@ -4,23 +4,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/config"
-	onboardingsvc "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/services/onboarding"
 	loantools "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/tools/loan"
 )
 
-func New(cfg config.OnboardingConfig) (*mcp.Server, func(), error) {
-	if cfg.GRPCAddress == "" {
-		return nil, func() {}, nil
-	}
-	client, err := onboardingsvc.NewOnboardingClient(cfg)
-	if err != nil {
-		return nil, func() {}, err
-	}
+// New builds the loan MCP server. Demo build: the loan tools are fully mocked
+// (see internal/tools/loan), so the server mounts unconditionally with a nil
+// client — no onboarding gRPC connection required.
+func New(_ config.OnboardingConfig) (*mcp.Server, func(), error) {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "lending-claw-loan",
 		Version: "1.0.0",
 	}, nil)
-	loantools.Register(srv, client)
-	cleanup := func() { _ = client.Close() }
-	return srv, cleanup, nil
+	loantools.Register(srv, nil)
+	return srv, func() {}, nil
 }
