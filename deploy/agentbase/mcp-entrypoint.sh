@@ -12,6 +12,8 @@ CONFIG_OUT=/etc/mcp/config.yaml
 export MCP_AUTH_TOKEN="${MCP_AUTH_TOKEN:-}"
 export JIRA_PERSONAL_TOKEN="${JIRA_PERSONAL_TOKEN:-}"
 export OPENSEARCH_PASSWORD="${OPENSEARCH_PASSWORD:-}"
+export LLM_API_KEY="${LLM_API_KEY:-}"
+export MAIL_RESEND_API_KEY="${MAIL_RESEND_API_KEY:-}"
 
 echo "[mcp-entrypoint] rendering config -> ${CONFIG_OUT}"
 envsubst < "${CONFIG_TMPL}" > "${CONFIG_OUT}"

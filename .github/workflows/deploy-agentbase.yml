@@ -358,4 +358,6 @@ jobs:
             MCP_AUTH_TOKEN=${{ secrets.MCP_AUTH_TOKEN }}
             JIRA_PERSONAL_TOKEN=${{ secrets.JIRA_PERSONAL_TOKEN }}
             OPENSEARCH_PASSWORD=${{ secrets.OPENSEARCH_PASSWORD }}
+            LLM_API_KEY=${{ secrets.LLM_API_KEY }}
+            MAIL_RESEND_API_KEY=${{ secrets.MAIL_RESEND_API_KEY }}
         run: ./scripts/deploy-mcp-agentbase.sh

@@ -72,48 +72,26 @@ func Register(srv *mcp.Server, client *opensearchsvc.OpenSearchClient) {
 	}, getAPIInfoHandler(client))
 }
 
-func searchHTTPErrorsHandler(client *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args httpErrorsArgs) (*mcp.CallToolResult, any, error) {
+// NOTE: Hackathon demo build — search_http_errors / get_logs_by_trace_id /
+// get_activity_log return a canned "no logs" response instead of hitting
+// OpenSearch so the demo flow is deterministic and offline. get_api_info below
+// still queries the real backend.
+
+func searchHTTPErrorsHandler(_ *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args httpErrorsArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args httpErrorsArgs) (*mcp.CallToolResult, any, error) {
-		hours := args.HoursDelta
-		if hours == 0 {
-			hours = 36
-		}
-		entries, err := client.SearchHTTPErrors(ctx, args.UserID, args.EventTime, hours)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error searching HTTP errors: %v", err)), nil, nil
-		}
-		return textResult(opensearchsvc.FormatLogEntries(entries)), nil, nil
+		return textResult("No log entries found"), nil, nil
 	}
 }
 
-func getLogsByTraceIDHandler(client *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args logsByTraceArgs) (*mcp.CallToolResult, any, error) {
+func getLogsByTraceIDHandler(_ *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args logsByTraceArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args logsByTraceArgs) (*mcp.CallToolResult, any, error) {
-		hours := args.HoursDelta
-		if hours == 0 {
-			hours = 36
-		}
-		entries, err := client.SearchByTraceID(ctx, args.TraceID, args.EventTime, hours)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error searching logs by trace ID: %v", err)), nil, nil
-		}
-		return textResult(opensearchsvc.FormatLogEntries(entries)), nil, nil
+		return textResult("No log entries found"), nil, nil
 	}
 }
 
-func getActivityLogHandler(client *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args activityLogArgs) (*mcp.CallToolResult, any, error) {
+func getActivityLogHandler(_ *opensearchsvc.OpenSearchClient) func(ctx context.Context, req *mcp.CallToolRequest, args activityLogArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args activityLogArgs) (*mcp.CallToolResult, any, error) {
-		if strings.TrimSpace(args.LoanApplicationID) == "" {
-			return errResult("loan_application_id is required"), nil, nil
-		}
-		hours := args.HoursDelta
-		if hours == 0 {
-			hours = 36
-		}
-		entries, err := client.SearchActivityLog(ctx, args.LoanApplicationID, args.EventTime, hours)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error searching activity logs: %v", err)), nil, nil
-		}
-		return textResult(opensearchsvc.FormatLogEntries(entries)), nil, nil
+		return textResult("No log entries found"), nil, nil
 	}
 }
 

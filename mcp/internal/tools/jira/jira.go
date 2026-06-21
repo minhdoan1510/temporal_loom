@@ -3,13 +3,14 @@ package jira
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	jirasvc "gitlab.zalopay.vn/fin/lending/lending-claw-mcp/internal/services/jira"
 )
+
+// NOTE: Hackathon demo build — the Jira tools return canned responses instead of
+// calling the real Jira backend so the demo flow is deterministic and offline.
 
 type readTicketArgs struct {
 	TicketID string `json:"ticket_id" jsonschema:"The JIRA ticket key (e.g., \"LENDING-123\")"`
@@ -33,6 +34,29 @@ type markDoneArgs struct {
 	IssueKey      string `json:"issue_key" jsonschema:"The JIRA ticket key (e.g., \"LENDING-123\")"`
 	RootCauseType string `json:"root_cause_type" jsonschema:"Root cause classification. Accepts an alias ('communication' or 'external_factors') or a raw customfield_13621 option ID."`
 }
+
+// demoTicketBody is the canned description returned by read_jira_ticket.
+const demoTicketBody = `**Summary:** [DEMO][Cashloan][Dịch vụ vay tiền nhanh] Khách hàng không tìm thấy hồ sơ vay
+
+**Status:** New
+**Type:** Production Issue
+**Priority:** P4 (Low)
+
+**Assignee:** Minh. Đoàn Công (3)
+**Reporter:** Minh. Đoàn Công (3)
+
+**Labels:** None
+**Components:** None
+
+**Created:** 2026-06-16T23:45:47.000+0700
+**Updated:** 2026-06-16T23:45:58.000+0700
+
+### Description:
+UserID: 260417000009999
+ Thời gian: 11:17 ngày 14/06/2026
+ Thiết bị:   Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 ZaloPayClient/11.6.2 OS/26.2 Platform/ios Secured/true ZaloPayWebClient/11.6.2
+
+Vấn đề:  Kh đăng ký vay SHB hệ thống báo đã có lỗi xảy ra, khách hàng không nhận được OTP, nhờ team kiểm tra nguyên nhân và hxl`
 
 func Register(srv *mcp.Server, client *jirasvc.JiraClient) {
 	mcp.AddTool(srv, &mcp.Tool{
@@ -70,114 +94,33 @@ The tool is idempotent if the ticket is already in Resolved state.`,
 	}, markDoneHandler(client))
 }
 
-func readTicketHandler(client *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args readTicketArgs) (*mcp.CallToolResult, any, error) {
+func readTicketHandler(_ *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args readTicketArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args readTicketArgs) (*mcp.CallToolResult, any, error) {
-		ticket, err := client.GetTicket(ctx, args.TicketID)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error reading ticket %s: %v", args.TicketID, err)), nil, nil
-		}
-		return textResult(fmt.Sprintf(`## JIRA Ticket: %s
-
-**Summary:** %s
-
-**Status:** %s
-**Type:** %s
-**Priority:** %s
-
-**Assignee:** %s
-**Reporter:** %s
-
-**Labels:** %s
-**Components:** %s
-
-**Created:** %s
-**Updated:** %s
-
-### Description:
-%s`,
-			ticket.Key, ticket.Summary, ticket.Status, ticket.IssueType,
-			orStr(ticket.Priority, "Not set"),
-			orStr(ticket.Assignee, "Unassigned"),
-			orStr(ticket.Reporter, "Unknown"),
-			joinOrNone(ticket.Labels),
-			joinOrNone(ticket.Components),
-			ticket.Created, ticket.Updated,
-			orStr(ticket.Description, "No description provided"),
-		)), nil, nil
+		return textResult(fmt.Sprintf("## JIRA Ticket: %s\n\n%s", args.TicketID, demoTicketBody)), nil, nil
 	}
 }
 
-func commentHandler(client *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args commentArgs) (*mcp.CallToolResult, any, error) {
+func commentHandler(_ *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args commentArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args commentArgs) (*mcp.CallToolResult, any, error) {
-		comment := addAuthor(args.Comment)
-		if err := client.AddComment(ctx, args.TicketID, comment); err != nil {
-			return errResult(fmt.Sprintf("Error adding comment to %s: %v", args.TicketID, err)), nil, nil
-		}
-		if err := client.AddLabels(ctx, args.TicketID, []string{"ai_resolve"}); err != nil {
-			slog.WarnContext(ctx, "failed to add ai_resolve label", "ticket", args.TicketID, "error", err)
-		}
 		return textResult(fmt.Sprintf("Comment added successfully to %s.", args.TicketID)), nil, nil
 	}
 }
 
-func markDoneHandler(client *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args markDoneArgs) (*mcp.CallToolResult, any, error) {
+func markDoneHandler(_ *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args markDoneArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args markDoneArgs) (*mcp.CallToolResult, any, error) {
-		rootCauseID, ok := jirasvc.LookupRootCauseID(args.RootCauseType)
-		if !ok {
-			return errResult(fmt.Sprintf("Invalid root_cause_type %q. Accepted: communication, external_factors, or a raw customfield_13621 option ID.", args.RootCauseType)), nil, nil
-		}
-		applied, err := client.MarkDoneCsTicket(ctx, args.IssueKey, rootCauseID)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error resolving %s: %v", args.IssueKey, err)), nil, nil
-		}
-		if err := client.AddLabels(ctx, args.IssueKey, []string{"auto_resolved"}); err != nil {
-			slog.WarnContext(ctx, "failed to add auto_resolved label", "ticket", args.IssueKey, "error", err)
-		}
-		msg := fmt.Sprintf("Ticket %s already Resolved. Label 'auto_resolved' applied.", args.IssueKey)
-		if len(applied) > 0 {
-			msg = fmt.Sprintf("Ticket %s transitioned via: %s. Label 'auto_resolved' applied.", args.IssueKey, strings.Join(applied, " → "))
-		}
-		return textResult(msg), nil, nil
+		return textResult(fmt.Sprintf("Ticket %s transitioned via: Acknowledge → Assigned → In Progress → Resolved. Label 'auto_resolved' applied.", args.IssueKey)), nil, nil
 	}
 }
 
-func getTicketsByJQLHandler(client *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args getTicketsByJQLArgs) (*mcp.CallToolResult, any, error) {
+func getTicketsByJQLHandler(_ *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args getTicketsByJQLArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args getTicketsByJQLArgs) (*mcp.CallToolResult, any, error) {
-		tickets, err := client.SearchJQL(ctx, args.JQL, args.MaxResults)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error searching tickets with JQL %q: %v", args.JQL, err)), nil, nil
-		}
-		if len(tickets) == 0 {
-			return textResult(fmt.Sprintf("No tickets found matching JQL: %s", args.JQL)), nil, nil
-		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("## CS Tickets (%d total)\n\n", len(tickets)))
-		for _, t := range tickets {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", t.Key, t.Summary))
-		}
-		return textResult(sb.String()), nil, nil
+		return textResult(fmt.Sprintf("No tickets found matching JQL: %s", args.JQL)), nil, nil
 	}
 }
 
-func getCommentsHandler(client *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args getCommentsArgs) (*mcp.CallToolResult, any, error) {
+func getCommentsHandler(_ *jirasvc.JiraClient) func(ctx context.Context, req *mcp.CallToolRequest, args getCommentsArgs) (*mcp.CallToolResult, any, error) {
 	return func(ctx context.Context, req *mcp.CallToolRequest, args getCommentsArgs) (*mcp.CallToolResult, any, error) {
-		comments, err := client.GetComments(ctx, args.TicketID)
-		if err != nil {
-			return errResult(fmt.Sprintf("Error getting comments for %s: %v", args.TicketID, err)), nil, nil
-		}
-		if len(comments) == 0 {
-			return textResult(fmt.Sprintf("No comments found on ticket %s.", args.TicketID)), nil, nil
-		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("## Comments on %s (%d total)\n\n", args.TicketID, len(comments)))
-		for i, c := range comments {
-			sb.WriteString(fmt.Sprintf("### Comment %d\n", i+1))
-			sb.WriteString(fmt.Sprintf("**Author:** %s\n", c.Author))
-			sb.WriteString(fmt.Sprintf("**Created:** %s\n\n", c.Created))
-			sb.WriteString(c.Body)
-			sb.WriteString("\n\n")
-		}
-		return textResult(sb.String()), nil, nil
+		return textResult(fmt.Sprintf("No comments found on ticket %s.", args.TicketID)), nil, nil
 	}
 }
 
@@ -185,31 +128,4 @@ func textResult(text string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 	}
-}
-
-func errResult(text string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: text}},
-	}
-}
-
-func addAuthor(comment string) string {
-	author := "[~minhdc3]"
-	feedbackLink := "https://teams.microsoft.com/l/channel/19%3Ae7e55276758144d9a64afb15d9d6568c%40thread.tacv2/%5BCSTool%5D%20Feedback?groupId=c3243a85-2d25-4d79-a072-716fdde7bc98&tenantId=7c112a6e-10e2-4e09-afc4-2e37bc60d821"
-	return fmt.Sprintf("(This message is generated by Lending Tool. Please contact %s if there are any issues with the information. For feedback or feature requests, please visit [CSTool Feedback|%s])\n%s", author, feedbackLink, comment)
-}
-
-func orStr(s *string, fallback string) string {
-	if s == nil || *s == "" {
-		return fallback
-	}
-	return *s
-}
-
-func joinOrNone(items []string) string {
-	if len(items) == 0 {
-		return "None"
-	}
-	return strings.Join(items, ", ")
 }

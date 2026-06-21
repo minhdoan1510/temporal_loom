@@ -19,6 +19,24 @@ telemetry:
   service_name: "lending-claw-mcp"
   otlp_endpoint: ""
 
+# Required by the datawarehouse MCP server (/mcp/datawarehouse). Without base_url
+# + api_key, dwserver.New() returns nil and the endpoint is never mounted -> 404.
+llm:
+  provider: "litellm"
+  model: "gemini/gemini-3.1-pro-preview"
+  base_url: "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1"
+  api_key: "${LLM_API_KEY}"
+
+datawarehouse:
+  mock: true
+  model: ""
+
+# Required by the mail MCP server (/mcp/mail). Without resend_api_key,
+# mailserver.New() returns nil and the endpoint is never mounted -> 404.
+mail:
+  resend_api_key: "${MAIL_RESEND_API_KEY}"
+  from_email: "admin@mixai.app"
+
 jira:
   url: "https://jira.zalopay.vn"
   personal_token: "${JIRA_PERSONAL_TOKEN}"
